@@ -157,49 +157,89 @@ The project roadmap spans from a dedicated download manager to an autonomous, cr
 
 ---
 
-## 3. TECH STACK
+## 3. TECH STACK (UPGRADED MODULAR & FUTURE-PROOF ARCHITECTURE)
 
-### 3.1 Shared Core Engine
+To guarantee maximum throughput, zero garbage-collection pauses, effortless cross-compilation (zero C/C++ toolchain headaches), and future extensibility into **Cross-Device Laptop $\leftrightarrow$ Phone Wi-Fi Mesh Bonding**, the system is engineered around a **100% shared, modular 5-crate Rust workspace** paired with native-grade Desktop and Mobile shells.
 
-The engine is engineered as a standalone, headless library (`giga_core`) written in Rust.
+```mermaid
+flowchart TB
+    subgraph Presentation ["Presentation Layer (UI & OS Shells)"]
+        DesktopShell["Desktop App (Windows / Linux / macOS) - Tauri 2.x + React 19 + TypeScript 5 + uPlot"]
+        MobileShell["Phone App (Android / Future iOS) - Kotlin 2.1 + Jetpack Compose + Material 3 + VpnService"]
+        HeadlessCLI["Headless CLI & Daemon - clap + ratatui"]
+    end
 
-| Component | Selected Library | Architectural Purpose | Advantages | Limitations | Viable Alternatives |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Language** | **Rust (2021 Edition)** | Core system, networking, memory management, file I/O | Zero-cost abstractions, memory safety without GC, deterministic resource reclamation, C-ABI interoperability | Steep learning curve, strict borrow checker constraints in complex async loops | Modern C++ (C++20), Go |
-| **Async Runtime** | **Tokio (`rt-multi-thread`)** | Task scheduling, async I/O, timers, concurrency primitives | Industry-standard async runtime, highly optimized work-stealing threadpool, cross-platform OS event polling (`mio` / epoll / kqueue / IOCP) | Runtime footprint (~500KB), cannot easily mix async runtimes within same process | `async-std`, `smol` |
-| **HTTP Client** | **Reqwest & Hyper** | HTTP protocol negotiation, TLS handshake, header parsing | Highly optimized, connection pooling, native streaming, supports rustls and native-tls | Reqwest does not expose socket-binding per connection cleanly without custom Hyper connectors | Pure `hyper` + `socket2` custom connector |
-| **Socket Control** | **`socket2`** | Low-level OS socket manipulation before connection establishment | Enables explicit binding to local IPv4/IPv6 addresses and interface indices (`SO_BINDTODEVICE`) | Requires OS-specific `cfg` branching | Direct libc / Winsock FFI bindings |
-| **Buffer Management** | **`bytes::Bytes` & `BytesMut`** | Zero-copy buffer slicing, circular worker queues | Reference-counted memory blocks, minimal heap allocation churn | Requires strict discipline to prevent buffer fragmentation under heavy load | Pre-allocated arena allocators (`bumpalo`) |
-| **Serialization** | **`serde` & `serde_json`** | State serialization, IPC transport, configuration management | Compile-time derive macros, minimal runtime overhead, zero-allocation deserialization | Schema migrations must be handled programmatically | `bincode`, `rkyv` |
-| **Persistence** | **SQLite via `rusqlite`** | Task state, completed chunk manifests, interface health history | ACID guarantees, single-file relational database, zero standalone daemon required | Contention under massive write loads if WAL mode is not configured | `sled`, `redb`, LMDB |
-| **Cryptography** | **`sha2` & `ring`** | Chunk hashing and end-to-end payload checksumming | SIMD-accelerated SHA-256 computation, constant-time validation | CPU intensive at gigabit throughput if not multithreaded | `blake3` (faster, but origins provide SHA-256) |
-| **Observability** | **`tracing` & `tracing-subscriber`** | Structured diagnostics, telemetry, performance profiling | Zero overhead when disabled, async-aware span propagation across tasks | Can generate large log volumes if tracing levels are misconfigured | `log` + `env_logger` |
-| **Cross-Language FFI**| **Mozilla `UniFFI`** | Cross-compiling Rust core to Kotlin/Android and Swift/iOS | Generates type-safe bindings across languages from a single UDL/macro definition | Requires build-time code generation pipeline | Raw JNI / C-ABI headers |
+    subgraph Bridge ["Zero-Copy IPC & FFI Bridge"]
+        TauriIPC["Tauri 2 IPC Channels (Binary Stream)"]
+        UniFFIBridge["Mozilla UniFFI Proc-Macros + Android C-NDK (android_setsocknetwork)"]
+    end
 
-### 3.2 Desktop Application Framework
+    subgraph RustWorkspace ["Shared Modular Rust Core Workspace (100% Reused Across Desktop & Phone)"]
+        GigaPAL["giga-pal: Platform Abstraction Layer (WinSock / WinTun / Linux Netlink & eBPF / Android NDK)"]
+        GigaINR["giga-inr: Intelligent Network Resolver (11-Metric Scorer, 7-State FSM, Hickory Bound DNS)"]
+        GigaSched["giga-scheduler: Adaptive QoS & Work-Stealing Brain (Local NICs + Remote Peer Mesh Nodes)"]
+        GigaTrans["giga-transport: Hyper 1.x + Tokio-Rustls + Socket2 + Smoltcp User-Space TCP Stack"]
+        GigaMesh["giga-mesh: Cross-Device Wi-Fi Mesh (Iroh / Quinn QUIC + mTLS 1.3 + mdns-sd Discovery)"]
+        GigaStore["giga-store: Pure-Rust ACID Persistence (redb + rkyv Zero-Copy Serialization)"]
+    end
 
-* **Framework:** **Tauri 2 (Release Candidate / Stable)**
-* **Frontend:** React 19, TypeScript 5, Vite, Tailwind CSS 4, Lucide Icons.
-* **Architectural Justification (Tauri vs. Electron):**
-  - *Memory Footprint:* Tauri utilizes the operating system's native webview (WebView2 on Windows, WebKitGTK on Linux), consuming ~30–60 MB of RAM compared to Electron's bundled Chromium instance consuming 250–500 MB.
-  - *IPC Performance:* Tauri uses zero-copy binary serialization across its IPC bridge directly into Rust memory space, whereas Electron requires JSON serialization across Chromium's Node.js IPC process boundaries.
-  - *Security Posture:* Tauri enforces a strict isolation pattern and Content Security Policy (CSP), eliminating arbitrary remote code execution risks inherent in Node-integration frameworks.
+    DesktopShell -->|"Tauri IPC"| TauriIPC
+    MobileShell -->|"JNI / NDK"| UniFFIBridge
+    HeadlessCLI -->|"Direct Rust API"| GigaSched
+    TauriIPC --> GigaSched
+    UniFFIBridge --> GigaSched
 
-### 3.3 Android Architecture Stack
+    GigaSched --> GigaINR
+    GigaSched --> GigaTrans
+    GigaSched --> GigaMesh
+    GigaSched --> GigaStore
+    GigaINR --> GigaPAL
+    GigaTrans --> GigaPAL
+    GigaMesh --> GigaPAL
+```
 
-* **Language:** Kotlin 2.0+
-* **UI Toolkit:** Jetpack Compose (Declarative reactive UI)
-* **OS Interfacing:**
-  - `android.net.ConnectivityManager` & `android.net.NetworkRequest`
-  - `android.net.Network` (Socket binding via `Network.bindSocket()`)
-  - `androidx.work.WorkManager` & `android.app.Service` (`FOREGROUND_SERVICE_TYPE_DATA_SYNC`)
-* **Core Linkage:** UniFFI-generated JNI bindings compiling `giga_core` as static `.so` libraries (`armeabi-v7a`, `arm64-v8a`, `x86_64`).
+*Figure 3.1: Modular, future-proof tech stack architecture sharing a 6-crate pure-Rust networking workspace across Desktop (Tauri 2) and Mobile Phone (Kotlin/Compose) with native Cross-Device Wi-Fi Mesh capabilities.*
+
+### 3.1 Shared Rust Core Engine Workspace
+
+| Component | Selected Library | Architectural Purpose | Why It Beats Legacy Alternatives |
+| :--- | :--- | :--- | :--- |
+| **Language & Runtime** | **Rust (2024 Edition) + Tokio (`rt-multi-thread`)** | Core system, async task scheduling, timers, lock-free concurrency | Zero-cost abstractions, memory safety without GC jitter, deterministic resource cleanup across Desktop and Mobile. |
+| **HTTP & Socket Engine** | **`hyper` 1.x + `hyper-util` + `tokio-rustls` + `socket2`** | Low-level HTTP/1.1 & HTTP/2 client, custom `tower::Service` connector, pre-connect socket binding | Replaces `reqwest`. Exposes raw socket file descriptors *before* `connect()`, which is mandatory for Android `android_setsocknetwork`, Windows `IP_UNICAST_IF`, and reading kernel `TCP_INFO` RTT/loss in-band. |
+| **Smart Per-NIC DNS** | **`hickory-resolver` (Custom Bound RuntimeProvider)** | Per-interface bound UDP/TCP/DoH/DoT DNS resolution & parallel hedging | Replaces OS default DNS (`getaddrinfo`), which ignores socket binding and hangs when the primary Wi-Fi router loses upstream WAN. |
+| **User-Space TCP & TUN** | **`smoltcp` (or `netstack-lwip`) + `tun-rs` + `wintun`** | Layer 3 $\rightarrow$ Layer 4 user-space TCP termination for system-wide VPN/TUN mode | Terminates local OS application flows captured via virtual `tun0` adapter and re-dispatches them over multiple bound physical sockets without requiring a remote VPS. |
+| **Local Proxy Engine** | **`fast-socks5` + `hyper` HTTP `CONNECT` Proxy** | Unprivileged `127.0.0.1:8080` loopback forward proxy & TLS SNI inspection | Enables zero-admin browser, CLI, and app acceleration with domain-affinity sticky routing and zero TLS MITM. |
+| **Cross-Device Mesh** | **`iroh` / `quinn` (QUIC + mTLS 1.3) + `mdns-sd`** | Connects Phone $\leftrightarrow$ Laptop over shared Wi-Fi or Wi-Fi Direct as a unified mesh | Turns a paired Phone on the same Wi-Fi into a remote 5G virtual interface for the Laptop using multiplexed, encrypted QUIC streams. |
+| **ACID Persistence** | **`redb` (Pure-Rust Embedded KV Store) + `rkyv`** *(with `sqlx` SQLite optional)* | Crash-safe chunk bitmaps, download state, INR health history, data cap budgets | 100% pure Rust (zero C compiler / Android NDK cross-compile friction), fully async-compatible, 5–10x faster than synchronous `rusqlite` for high-frequency chunk commits. |
+| **Buffer Management** | **`bytes::Bytes` & `BytesMut`** | Zero-copy packet & chunk slicing across network sockets and disk writers | Reference-counted memory slices prevent heap allocation churn at multi-gigabit speeds. |
+| **Cryptography** | **`aws-lc-rs` + `sha2` (SIMD) + `blake3`** | TLS 1.3 crypto backend, end-to-end SHA-256 verification, and fast peer chunk hashing | `aws-lc-rs` is the modern, high-speed cryptographic backend for `rustls`; `blake3` verifies peer-to-peer mesh chunks at >4 GB/s. |
+| **Observability** | **`tracing` + `tracing-subscriber`** | Structured async span diagnostics, state machine audit logs, telemetry | Zero overhead when disabled; async-aware context propagation across workers. |
+| **Cross-Language FFI** | **Mozilla `UniFFI` (Proc-Macro Mode) + `cargo-ndk`** | Auto-generated type-safe async Kotlin (`suspend fun`) and Swift bindings | Eliminates hand-written JNI boilerplate; compiles the entire Rust workspace into `libgiga_core.so`. |
+
+### 3.2 Ideal Desktop Application Stack (Windows, Linux, macOS)
+
+* **App Shell & Runtime:** **Tauri 2.x** (consumes ~35–50 MB RAM via OS native WebView2/WebKitGTK vs. 300+ MB in Electron; streams high-frequency binary telemetry over `tauri::ipc::Channel`).
+* **Frontend Framework:** **React 19 + TypeScript 5 + Vite 6**.
+* **State Management:** **Zustand** (handles 20–60 Hz telemetry updates outside React's VDOM reconciliation loop) + **TanStack Query**.
+* **UI Styling & Design System:** **Tailwind CSS v4 + Shadcn UI (Radix Primitives) + Lucide Icons**.
+* **60 FPS Telemetry & Visualization:** **`uPlot` + HTML5 `OffscreenCanvas`** (renders live stacked multi-interface bandwidth timelines and 10,000-cell "GigaMap" chunk grids at 60 FPS with `< 1%` CPU usage, avoiding heavy SVG chart libraries like Recharts).
+
+### 3.3 Ideal Mobile (Phone) Architecture Stack (Android & Future iOS)
+
+* **Language & UI Toolkit:** **Kotlin 2.1 + Jetpack Compose (Material 3)** (structured for seamless **Compose Multiplatform / KMP** expansion to iOS).
+* **Architecture & Reactive State:** **MVI (Model-View-Intent) + Kotlin Coroutines / `StateFlow` + `Hilt` Dependency Injection**.
+* **Native OS & NDK Networking Integration:**
+  - `android.net.ConnectivityManager` (`requestNetwork` keeping Wi-Fi, 5G Cellular, and USB OTG Ethernet active simultaneously).
+  - **Native C-NDK Socket Binding (`<android/multinetwork.h>` $\rightarrow$ `android_setsocknetwork(net_handle_t, int fd)`):** Allows Rust worker threads to bind sockets directly to Android `Network` handles at native C speed without round-tripping through Java JNI on every connection.
+  - `android.net.VpnService`: Captures system-wide mobile app traffic into a virtual `tun0` file descriptor handed directly to Rust (`tun-rs` + `smoltcp`).
+  - `android.net.wifi.p2p.WifiP2pManager` + `NsdManager`: Supports mDNS LAN discovery and Wi-Fi Direct P2P bridging with the Desktop app even when campus Wi-Fi enables AP client isolation.
+  - `ForegroundService` (`connectedDevice` | `dataSync` | `specialUse`): Ensures uninterrupted background execution when accelerating downloads or acting as a 5G Mesh Relay for a paired Laptop.
 
 ### 3.4 Platform Networking Subsystems
 
-* **Windows:** Winsock 2 (`ws2_32.lib`), `GetAdaptersAddresses` (IP Helper API), per-socket local IP binding. Long-term: Windows Filtering Platform (WFP) Callout Drivers.
-* **Linux:** `sys/socket.h`, `SO_BINDTODEVICE` (requiring `CAP_NET_RAW` or root if not strictly binding by local IP), Netlink sockets (`rtnetlink`) for routing table queries, Policy Routing (`ip rule`).
-* **Android:** Android Network APIs (SDK Level 31+), multi-network requesting, non-root socket binding via file descriptor handover.
+* **Windows:** Winsock 2 (`ws2_32.lib`), `IP_UNICAST_IF` per-socket interface binding, `NotifyIpInterfaceChange` / `GetAdaptersAddresses` (`iphlpapi.dll`), `wlanapi.dll` (Wi-Fi RSSI/SNR), `GetPerTcpConnectionEStats` (kernel RTT/loss), **WinTun** (`wintun.dll`) virtual adapter, and long-term **Windows Filtering Platform (WFP)** callout driver.
+* **Linux:** `SO_BINDTODEVICE` + source-IP policy routing (`rtnetlink`), `nl80211` generic netlink (Wi-Fi RSSI/bitrate), `SOL_TCP` / `TCP_INFO` kernel telemetry, `tun-rs` virtual adapter, and **`aya` (Pure-Rust eBPF)** `BPF_CGROUP_INET4_CONNECT` transparent socket steering.
+* **Android:** Android Multi-Network APIs (API 29–35+), NDK `android_setsocknetwork()`, `TelephonyCallback` (5G NR RSRP/SINR), and `VpnService` non-root system-wide packet routing.
 
 ---
 
@@ -208,65 +248,70 @@ The engine is engineered as a standalone, headless library (`giga_core`) written
 ### 4.1 High-Level Architecture Diagram
 
 ```mermaid
-graph TD
+flowchart TD
     subgraph UI_Layer ["Presentation Layer"]
-        D_UI["Desktop UI (React/Tauri)"]
-        A_UI["Android UI (Compose)"]
-        CLI["Headless CLI Tool"]
+        D_UI["Desktop UI (React 19 / Tauri 2)"]
+        A_UI["Phone UI (Kotlin 2.1 / Jetpack Compose)"]
+        CLI["Headless CLI & Daemon"]
     end
 
-    subgraph IPC_Bridge ["IPC & Binding Layer"]
-        T_IPC["Tauri IPC Commands & Events"]
-        JNI_B["UniFFI / JNI Bridge"]
+    subgraph IPC_Bridge ["IPC & FFI Binding Layer"]
+        T_IPC["Tauri 2 IPC Commands & Binary Channels"]
+        JNI_B["UniFFI + Android NDK Bridge"]
     end
 
-    subgraph Core_Engine ["giga_core (Rust Core Engine)"]
-        DM["Download Manager (Coordinator)"]
+    subgraph Core_Engine ["giga_core Workspace (Shared Rust Engine)"]
+        DM["Engine Coordinator & Session Manager"]
         
-        subgraph Subsystems ["Core Engine Subsystems"]
-            SCHED["Adaptive Chunk Scheduler"]
-            IF_MGR["Network Interface Manager"]
-            WORK_POOL["Worker Thread Pool (Tokio)"]
-            REASM["Sparse File Reassembler"]
-            DB_ENGINE["SQLite Metadata Engine"]
-            INTEG["Integrity Engine (SHA-256)"]
+        subgraph Subsystems ["Modular Core Subsystems"]
+            INR["giga-inr: Intelligent Network Resolver"]
+            SCHED["giga-scheduler: Adaptive QoS & Chunk Brain"]
+            TRANS["giga-transport: Hyper + Socket2 + Smoltcp"]
+            MESH["giga-mesh: Phone-Laptop QUIC Bridge"]
+            REASM["Sparse File Reassembler & BLAKE3/SHA-256"]
+            DB_ENGINE["giga-store: redb / SQLite ACID Engine"]
         end
     end
 
-    subgraph OS_Network ["Operating System Network Stack"]
-        SOCK_1["Socket 1 (Bound to Iface 1)"]
-        SOCK_2["Socket 2 (Bound to Iface 2)"]
-        SOCK_3["Socket 3 (Bound to Iface 3)"]
+    subgraph OS_Network ["Operating System & Mesh Socket Layer"]
+        SOCK_1["Socket 1 (Bound to Local NIC 1)"]
+        SOCK_2["Socket 2 (Bound to Local NIC 2)"]
+        SOCK_3["Socket 3 (Bound to Local NIC 3)"]
+        SOCK_MESH["QUIC Mesh Stream (Bound to Paired Phone over Wi-Fi)"]
     end
 
-    subgraph Physical_Adapters ["Physical Interfaces"]
-        NIC_1["NIC 1: Ethernet (eth0)"]
-        NIC_2["NIC 2: Wi-Fi 6 (wlan0)"]
-        NIC_3["NIC 3: 5G USB (usb0)"]
+    subgraph Physical_Adapters ["Physical & Virtual Egress Paths"]
+        NIC_1["NIC 1: Gigabit Ethernet (eth0)"]
+        NIC_2["NIC 2: Wi-Fi 6 Router (wlan0)"]
+        NIC_3["NIC 3: USB Tether (usb0)"]
+        PEER_5G["Paired Phone: 5G Cellular via Local Wi-Fi Mesh"]
     end
 
-    D_UI -->|Tauri Invoke| T_IPC
-    A_UI -->|JNI Calls| JNI_B
-    CLI -->|Rust API| DM
+    D_UI -->|"Tauri Invoke"| T_IPC
+    A_UI -->|"UniFFI Calls"| JNI_B
+    CLI -->|"Rust API"| DM
     T_IPC --> DM
     JNI_B --> DM
 
+    DM --> INR
     DM --> SCHED
-    DM --> IF_MGR
     DM --> DB_ENGINE
-    SCHED --> WORK_POOL
-    WORK_POOL --> REASM
-    WORK_POOL --> SOCK_1
-    WORK_POOL --> SOCK_2
-    WORK_POOL --> SOCK_3
-    REASM --> INTEG
+    INR --> SCHED
+    SCHED --> TRANS
+    SCHED --> MESH
+    TRANS --> REASM
+    TRANS --> SOCK_1
+    TRANS --> SOCK_2
+    TRANS --> SOCK_3
+    MESH --> SOCK_MESH
 
     SOCK_1 --> NIC_1
     SOCK_2 --> NIC_2
     SOCK_3 --> NIC_3
+    SOCK_MESH --> PEER_5G
 ```
 
-*Figure 4.1: High-level layered architecture depicting presentation entrypoints interfacing with the shared Rust engine, down through socket binding into discrete physical adapters.*
+*Figure 4.1: High-level layered architecture depicting presentation entrypoints interfacing with the shared Rust engine, down through socket binding and cross-device QUIC meshing into discrete physical adapters.*
 
 ---
 
@@ -274,36 +319,36 @@ graph TD
 
 ```mermaid
 flowchart TD
-    Start(["User Submits URL"]) --> Probe["Send HTTP HEAD Probe via Default Route"]
-    Probe --> RangeCheck{"Accept-Ranges: bytes<br/>& Content-Length > 0?"}
+    Start(["User or Browser Submits URL"]) --> Probe["Send Bound HTTP HEAD Probe via Top Active Interface"]
+    Probe --> RangeCheck{"Supports Accept-Ranges bytes and Content-Length > 0?"}
     
-    RangeCheck -- "No" --> Fallback["Fallback Mode:<br/>Single-Socket Stream on Fastest Interface"]
+    RangeCheck -- "No" --> Fallback["Fallback Mode: Single-Socket Stream on Highest-CHS Interface"]
     Fallback --> StreamDownload["Sequential Download to Disk"]
-    StreamDownload --> VerifyFile["Verify SHA-256 (if provided)"]
+    StreamDownload --> VerifyFile["Verify SHA-256 / BLAKE3 Integrity"]
     
-    RangeCheck -- "Yes" --> EnumIF["Enumerate Available Network Interfaces"]
-    EnumIF --> FilterIF["Filter Active, Valid, Independent Adapters"]
+    RangeCheck -- "Yes" --> EnumIF["Query INR for Eligible Active and Mesh Interfaces"]
+    EnumIF --> FilterIF["Filter Independent WAN Gateways & Healthy Links"]
     FilterIF --> Prealloc["Pre-allocate Sparse Target File on Disk"]
-    Prealloc --> InitDB["Record Metadata & Chunks into SQLite"]
+    Prealloc --> InitDB["Record Metadata & Chunk Bitmap into redb / SQLite"]
     
-    InitDB --> WorkerSpawn["Spawn Tokio Download Workers per Interface"]
-    WorkerSpawn --> SocketBind["Bind Client Socket to Specific Local Adapter IP"]
+    InitDB --> WorkerSpawn["Spawn Tokio Workers per Local NIC & Paired Mesh Peer"]
+    WorkerSpawn --> SocketBind["Bind Client Socket via socket2 / NDK / QUIC Stream"]
     SocketBind --> FetchChunk["Send HTTP GET with Range: bytes=X-Y"]
     
     FetchChunk --> StreamData["Stream Binary Data to Sparse File Offset"]
-    StreamData --> UpdateMetrics["Update Interface EMA Speed in Scheduler"]
+    StreamData --> UpdateMetrics["Update Interface EMA Speed & Passive TCP_INFO in INR"]
     
     UpdateMetrics --> ChunkDone{"Chunk Complete?"}
-    ChunkDone -- "No" --> ErrorCheck{"Socket Error or Timeout?"}
-    ErrorCheck -- "Yes" --> Reassign["Mark Chunk Orphaned & Reassign to Peer"]
+    ChunkDone -- "No" --> ErrorCheck{"Socket Error or Interface Excluded?"}
+    ErrorCheck -- "Yes" --> Reassign["Preserve Flushed Prefix, Split Tail & Reassign to Healthy Peer"]
     Reassign --> WorkerSpawn
     ErrorCheck -- "No" --> StreamData
     
-    ChunkDone -- "Yes" --> CommitDB["Commit Chunk Status in SQLite"]
+    ChunkDone -- "Yes" --> CommitDB["Commit Chunk Status in ACID Store"]
     CommitDB --> MoreChunks{"Unassigned Chunks Left?"}
     MoreChunks -- "Yes" --> FetchChunk
     
-    MoreChunks -- "No" --> StragglerCheck{"Stragglers Detected<br/>on Slower Links?"}
+    MoreChunks -- "No" --> StragglerCheck{"Stragglers Detected on Slower Links?"}
     StragglerCheck -- "Yes" --> SplitSteal["Split Remaining Tail & Assign to Fast Workers"]
     SplitSteal --> FetchChunk
     
@@ -312,14 +357,14 @@ flowchart TD
     VerifyFile --> Complete(["Emit Download Completed Event"])
 ```
 
-*Figure 4.2: Comprehensive download lifecycle flowchart detailing range verification, fallback paths, worker assignment, and straggler mitigation.*
+*Figure 4.2: Comprehensive download lifecycle flowchart detailing range verification, fallback paths, worker assignment, zero-loss chunk splitting, and straggler mitigation.*
 
 ---
 
 ### 4.3 Chunk Distribution Matrix
 
 ```mermaid
-graph LR
+flowchart LR
     subgraph Remote_Payload ["Remote 10 GB File (Payload: 0 to 10,737,418,239 bytes)"]
         C1["Chunk 1: 0 - 32MB"]
         C2["Chunk 2: 32MB - 64MB"]
@@ -334,13 +379,13 @@ graph LR
         Q["Global Chunk Priority Queue"]
     end
 
-    subgraph Workers ["Interface Workers"]
-        W1["Worker Pool A<br/>Ethernet (200 Mbps)<br/>Capacity Ratio: 4x"]
-        W2["Worker Pool B<br/>Wi-Fi 6 (100 Mbps)<br/>Capacity Ratio: 2x"]
-        W3["Worker Pool C<br/>5G Tether (50 Mbps)<br/>Capacity Ratio: 1x"]
+    subgraph Workers ["Interface Worker Pools"]
+        W1["Worker Pool A: Ethernet (200 Mbps - Ratio 4x)"]
+        W2["Worker Pool B: Wi-Fi 6 (100 Mbps - Ratio 2x)"]
+        W3["Worker Pool C: Phone 5G Mesh / USB (50 Mbps - Ratio 1x)"]
     end
 
-    subgraph Sparse_File ["Local Target File System (Direct Write Offsets)"]
+    subgraph Sparse_File ["Local Target File System (Direct Positional Write Offsets)"]
         F1["Seek 0x00000000 -> Write Chunk 1"]
         F2["Seek 0x02000000 -> Write Chunk 2"]
         F3["Seek 0x04000000 -> Write Chunk 3"]
@@ -348,9 +393,9 @@ graph LR
     end
 
     Remote_Payload --> Q
-    Q -->|Assign C1, C2, C4, C5| W1
-    Q -->|Assign C3, C6| W2
-    Q -->|Assign C_N| W3
+    Q -->|"Assign C1, C2, C4, C5"| W1
+    Q -->|"Assign C3, C6"| W2
+    Q -->|"Assign C_N"| W3
 
     W1 --> F1
     W1 --> F2
@@ -367,13 +412,13 @@ graph LR
 ```mermaid
 sequenceDiagram
     autonumber
-    participant UI as Desktop/Mobile UI
+    participant UI as Desktop or Mobile UI
     participant DM as Download Manager
     participant Sched as Adaptive Scheduler
-    participant W_Eth as Worker (Ethernet)
-    participant W_Wifi as Worker (Wi-Fi)
+    participant W_Eth as Worker Ethernet
+    participant W_Wifi as Worker Wi-Fi
     participant Disk as Sparse File Storage
-    participant DB as SQLite DB
+    participant DB as ACID State Store
 
     UI->>DM: start_download(url, destination)
     DM->>Sched: initialize_job(total_bytes, interfaces)
@@ -398,9 +443,9 @@ sequenceDiagram
     Sched->>DB: mark_chunk_complete(chunk_1)
     Sched->>W_Eth: assign_next_chunk(chunk_3)
 
-    alt Wi-Fi Encountered Degradation (Straggler)
+    alt Wi-Fi Encountered Degradation or Straggler
         Sched->>Sched: evaluate_lag(chunk_2, wifi_speed)
-        Note over Sched: Wi-Fi dropped to 2 Mbps.<br/>Ethernet running at 200 Mbps.
+        Note over Sched: Wi-Fi dropped to 2 Mbps while Ethernet runs at 200 Mbps
         Sched->>W_Eth: assign_stolen_subchunk(chunk_2_tail)
         W_Eth->>Disk: pwrite(offset=chunk_2_tail_offset, buffer)
         W_Wifi->>W_Wifi: abort_tail_fetch()
@@ -419,13 +464,13 @@ sequenceDiagram
 ### 4.5 Desktop Architecture Diagram
 
 ```mermaid
-graph TB
-    subgraph Frontend ["Desktop Frontend (Vite / React 19 / TS)"]
+flowchart TB
+    subgraph Frontend ["Desktop Frontend (Vite 6 / React 19 / TS 5)"]
         App["App Shell (Routing, Global Layout)"]
-        DashView["Dashboard & Network Status"]
-        QueueView["Download Queue & Live Canvas Map"]
-        SettingsView["Interface Priorities & Limits"]
-        StateStore["Zustand State Store"]
+        DashView["Dashboard, INR Health & Mesh Status"]
+        QueueView["Download Queue & OffscreenCanvas GigaMap"]
+        SettingsView["Interface Priorities, Budgets & Mesh Pairing"]
+        StateStore["Zustand High-Frequency State Store"]
         
         App --> DashView
         App --> QueueView
@@ -436,134 +481,139 @@ graph TB
 
     subgraph Tauri_Core ["Tauri 2 Runtime (Rust Backend)"]
         CmdRouter["Tauri Command Dispatcher"]
-        EventEmitter["Tauri Event Bridge (tauri::Emitter)"]
-        TrayMgr["System Tray & Background Manager"]
+        EventEmitter["Tauri IPC Channel & Event Bridge"]
+        TrayMgr["System Tray & Background Daemon Manager"]
         
         CmdRouter --> EngineFacade["GigaEngine Facade"]
         EngineFacade --> EventEmitter
     end
 
-    subgraph Native_Core ["Shared giga_core Engine"]
+    subgraph Native_Core ["Shared giga_core Rust Workspace"]
         EngineFacade --> CoreCoordinator["Engine Coordinator"]
         CoreCoordinator --> TokioRt["Tokio Multithreaded Runtime"]
-        TokioRt --> WinSockLayer["Windows / Linux Socket Layer"]
+        TokioRt --> WinSockLayer["Windows / Linux Socket & TUN Layer"]
     end
 
-    StateStore -->|invoke('command')| CmdRouter
-    EventEmitter -->|listen('event')| StateStore
+    StateStore -->|"invoke command"| CmdRouter
+    EventEmitter -->|"stream telemetry"| StateStore
 ```
 
-*Figure 4.5: Desktop architecture highlighting the unidirectional command flow from React to the Tauri Rust core and bidirectional event streams for high-frequency telemetry.*
+*Figure 4.5: Desktop architecture highlighting the unidirectional command flow from React to the Tauri Rust core and bidirectional IPC channels for high-frequency telemetry.*
 
 ---
 
 ### 4.6 Android Architecture Diagram
 
 ```mermaid
-graph TB
-    subgraph Android_UI ["Android Presentation (Kotlin / Jetpack Compose)"]
+flowchart TB
+    subgraph Android_UI ["Phone Presentation (Kotlin 2.1 / Jetpack Compose)"]
         MainActivity["MainActivity"]
-        ComposeScreens["Screens (Home, Details, Adapters)"]
-        ComposeViewModels["AAC ViewModels (StateFlow)"]
+        ComposeScreens["Compose Screens (Dashboard, GigaMap, Mesh Bridge)"]
+        ComposeViewModels["MVI ViewModels (Kotlin StateFlow)"]
         
         MainActivity --> ComposeScreens
         ComposeScreens --> ComposeViewModels
     end
 
-    subgraph Android_Services ["Android Lifecycle & Networking Framework"]
-        FG_Service["DownloadForegroundService (dataSync)"]
-        ConnMgr["ConnectivityManager.NetworkCallback"]
-        NotificationMgr["NotificationManager (Progress Updates)"]
+    subgraph Android_Services ["Android Lifecycle & Multi-Network Framework"]
+        FG_Service["GigaForegroundService (dataSync & connectedDevice)"]
+        Vpn_Service["GigaOptimizationVpnService (tun0 System Capture)"]
+        ConnMgr["ConnectivityManager (Simultaneous Wi-Fi + 5G + USB)"]
+        WifiDirect["NsdManager mDNS & WifiP2pManager (Laptop Mesh)"]
         
-        ComposeViewModels -->|Start/Stop| FG_Service
+        ComposeViewModels -->|"Start / Control"| FG_Service
         FG_Service --> ConnMgr
-        FG_Service --> NotificationMgr
+        FG_Service --> Vpn_Service
+        FG_Service --> WifiDirect
     end
 
-    subgraph JNI_Layer ["Native Interop (UniFFI)"]
-        UniFFI_K["UniFFI Kotlin Auto-Generated Bindings"]
-        Native_SO["libgiga_core.so (C-ABI Dynamic Library)"]
+    subgraph JNI_Layer ["Native Interop (UniFFI + Android C-NDK)"]
+        UniFFI_K["UniFFI Auto-Generated Kotlin Coroutine Bindings"]
+        Native_SO["libgiga_core.so (Shared Rust Workspace)"]
         
         FG_Service --> UniFFI_K
         UniFFI_K --> Native_SO
     end
 
-    subgraph Android_Sockets ["OS Sockets & Storage"]
-        ConnMgr -->|Network.bindSocket(fd)| Native_SO
+    subgraph Android_Sockets ["OS Sockets, TUN & Storage"]
+        ConnMgr -->|"NDK android_setsocknetwork"| Native_SO
+        Vpn_Service -->|"Pass tun0 FD"| Native_SO
         Native_SO --> AppStorage["Scoped Storage (MediaStore / App Sandbox)"]
     end
 ```
 
-*Figure 4.6: Android application topology detailing foreground lifecycle protection, non-root `Network.bindSocket()` passing, and UniFFI JNI bridging.*
+*Figure 4.6: Android application topology detailing foreground lifecycle protection, non-root NDK `android_setsocknetwork()` socket binding, `VpnService` system capture, and UniFFI bridging.*
 
 ---
 
 ### 4.7 OS-Level Integration Diagram
 
 ```mermaid
-graph TD
+flowchart TD
     subgraph ThirdPartyApps ["Third-Party Applications (System-Wide Scope)"]
-        Browser["Web Browsers (Chrome / Firefox)"]
-        GameLauncher["Game Clients (Steam / Epic)"]
+        Browser["Web Browsers (Chrome / Firefox / Brave)"]
+        GameLauncher["Game & App Clients (Steam / Epic / Streaming)"]
         SystemCLI["System CLI (curl / wget / package managers)"]
     end
 
-    subgraph Interception_Tier ["Interception Mechanisms (Post-MVP)"]
-        Ext["Browser Extension (Native Messaging)"]
+    subgraph Interception_Tier ["Interception Mechanisms"]
+        Ext["Browser Extension (Native Messaging IPC)"]
         LocalProxy["Local SOCKS5 / HTTP Proxy (127.0.0.1:8080)"]
-        TUN_Device["Virtual TUN/TAP Device (tun0)"]
-        WFP_Callout["Windows Filtering Platform (WFP Kernel Callout)"]
+        TUN_Device["Virtual TUN Adapter (WinTun / tun0 / VpnService)"]
+        Kernel_Hook["WFP Callout (Windows) / aya eBPF (Linux)"]
     end
 
     subgraph Engine_Ingest ["WiFi GigaChad 420 Core Engine"]
-        ProxyServer["Internal Stream Proxy Demuxer"]
-        CoreScheduler["Adaptive Core Scheduler"]
+        ProxyServer["Smoltcp User-Space TCP Terminator & SNI Classifier"]
+        CoreScheduler["Adaptive Multi-Interface & Mesh Scheduler"]
     end
 
-    subgraph Physical_Egress ["Multi-Interface Physical Dispatch"]
-        NIC1["Physical NIC 1"]
-        NIC2["Physical NIC 2"]
+    subgraph Physical_Egress ["Multi-Interface & Cross-Device Egress"]
+        NIC1["Physical NIC 1 (Ethernet / Wi-Fi)"]
+        NIC2["Physical NIC 2 (5G / Secondary Wi-Fi)"]
+        MeshNIC["Paired Phone 5G Relay (Over Local Wi-Fi QUIC)"]
     end
 
-    Browser -->|Explicit Configuration| LocalProxy
-    Browser -->|DOM Intercept| Ext
-    Ext -->|Native Messaging IPC| CoreScheduler
-    SystemCLI -->|HTTP_PROXY env| LocalProxy
-    GameLauncher -->|Raw IP Packets| TUN_Device
-    Browser -.->|Kernel Packet Capture| WFP_Callout
+    Browser -->|"Explicit / PAC Proxy"| LocalProxy
+    Browser -->|"Download Handoff"| Ext
+    Ext -->|"Native Messaging"| CoreScheduler
+    SystemCLI -->|"HTTP_PROXY / ALL_PROXY"| LocalProxy
+    GameLauncher -->|"Layer 3 IP Packets"| TUN_Device
+    Browser -.->|"Transparent Socket Redirect"| Kernel_Hook
 
     LocalProxy --> ProxyServer
     TUN_Device --> ProxyServer
-    WFP_Callout --> ProxyServer
+    Kernel_Hook --> ProxyServer
 
     ProxyServer --> CoreScheduler
     CoreScheduler --> NIC1
     CoreScheduler --> NIC2
+    CoreScheduler --> MeshNIC
 ```
 
-*Figure 4.7: OS-level integration showing Tier A (direct engine), Tier B (local proxy loopback & browser extension), and Tier C (WFP/TUN transparent kernel packet capture).*
+*Figure 4.7: OS-level integration showing direct engine handoff, local proxy loopback, and virtual TUN / eBPF / WFP capture dispatching across local NICs and paired mesh devices.*
 
 ---
 
 ### 4.8 Optional Remote Bonding Architecture
 
 ```mermaid
-graph LR
+flowchart LR
     subgraph Client_Premises ["Client Host (WiFi GigaChad 420)"]
-        AppTraffic["Target Application Stream (e.g., Live UDP / Single TCP)"]
-        Encapsulator["Tunnel Encapsulation Engine (MPTCP / Multi-WireGuard)"]
-        Client_NIC1["NIC 1 (IP1)"]
-        Client_NIC2["NIC 2 (IP2)"]
+        AppTraffic["Target Application Stream (Single Non-Ranged TCP / UDP)"]
+        Encapsulator["Multipath Encapsulation Engine (MP-QUIC / Multi-WireGuard)"]
+        Client_NIC1["NIC 1 (ISP 1)"]
+        Client_NIC2["NIC 2 (ISP 2 or Phone Mesh)"]
     end
 
-    subgraph Public_Transit ["Internet Over Multiple ISPs"]
+    subgraph Public_Transit ["Internet Over Multiple Independent ISPs"]
         Transit1["ISP 1 Routing Path"]
         Transit2["ISP 2 Routing Path"]
     end
 
     subgraph Cloud_Infrastructure ["Remote Bonding Aggregator (VPS)"]
-        Aggregator_NIC["Public Ingress (Single Public Static IP)"]
-        Decapsulator["Stream Decapsulation & TCP Reassembly Engine"]
+        Aggregator_NIC["Public Ingress (Single Static Public IP)"]
+        Decapsulator["Packet Reordering & Stream Reassembly Engine"]
         SNAT["Stateful Source NAT Engine"]
     end
 
@@ -572,18 +622,18 @@ graph LR
     end
 
     AppTraffic --> Encapsulator
-    Encapsulator -->|Encapsulated Tunnel Packets| Client_NIC1
-    Encapsulator -->|Encapsulated Tunnel Packets| Client_NIC2
+    Encapsulator -->|"Encrypted Subflow 1"| Client_NIC1
+    Encapsulator -->|"Encrypted Subflow 2"| Client_NIC2
 
     Client_NIC1 --> Transit1 --> Aggregator_NIC
     Client_NIC2 --> Transit2 --> Aggregator_NIC
 
     Aggregator_NIC --> Decapsulator
     Decapsulator --> SNAT
-    SNAT -->|Unified TCP Stream| RemoteServer
+    SNAT -->|"Unified Single-IP TCP Stream"| RemoteServer
 ```
 
-*Figure 4.8: Long-term remote bonding architecture. Required when accelerating arbitrary, non-HTTP, or non-ranged TCP connections via an external cloud proxy node.*
+*Figure 4.8: Long-term remote bonding architecture required when accelerating a single indivisible, non-ranged TCP connection across multiple public IPs.*
 
 ---
 
@@ -1322,60 +1372,82 @@ If the application is terminated abruptly (power loss, OS crash, process killed)
 
 ## 12. PROJECT STRUCTURE
 
-The project is structured as an integrated monorepo:
+The project is structured as a modular, scalable Rust + Multi-Platform monorepo:
 
 ```
 WifiGigaChad420/
-├── Cargo.toml                     # Root workspace definition
+├── Cargo.toml                     # Root Rust workspace definition
 ├── README.md                      # Community documentation & quickstart
-├── LICENSE                        # Open-source license (GPL-3.0 / Apache-2.0 dual)
+├── LICENSE                        # GNU GPL v3.0 License
+├── SECURITY.md                    # Security policy & vulnerability disclosure
+├── CODE_OF_CONDUCT.md             # Contributor Covenant Code of Conduct
+├── CONTRIBUTING.md                # Developer setup & contribution guidelines
 ├── .github/
 │   └── workflows/
 │       ├── test_core.yml          # Cross-platform Rust tests (Ubuntu, Windows, macOS)
-│       ├── build_desktop.yml       # Tauri multi-platform binary compilation
-│       └── build_android.yml       # Android APK & AAB packaging pipeline
+│       ├── build_desktop.yml       # Tauri 2 multi-platform binary compilation
+│       └── build_android.yml       # Android NDK + Jetpack Compose APK/AAB pipeline
 ├── crates/
-│   ├── giga_core/                 # Core download & scheduling engine
+│   ├── giga_pal/                  # Platform Abstraction Layer (OS sockets, NDK, WinTun, eBPF)
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       ├── lib.rs
-│   │       ├── engine.rs          # Central coordinator
-│   │       ├── scheduler.rs       # Dynamic work-stealing scheduler
-│   │       ├── worker.rs          # Per-interface HTTP worker
-│   │       ├── reassembler.rs     # Sparse file writer & pre-allocator
-│   │       ├── integrity.rs       # SHA-256 validation engine
-│   │       └── error.rs           # Standardized error enums
-│   ├── giga_net/                  # Platform networking & socket binding
+│   │       ├── interface.rs       # NetworkInterface trait & hardware discovery
+│   │       ├── socket.rs          # socket2 pre-connect binding & TCP_INFO hooks
+│   │       ├── independence.rs    # ARP / STUN shared-gateway detector
+│   │       ├── windows.rs         # WinSock2, IP_UNICAST_IF, wlanapi, WinTun, WFP
+│   │       ├── linux.rs           # rtnetlink, nl80211, SO_BINDTODEVICE, aya eBPF
+│   │       └── android.rs         # C-NDK android_setsocknetwork & VpnService tun0
+│   ├── giga_inr/                  # Intelligent Network Resolver & Health State Machine
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       ├── lib.rs
-│   │       ├── interface.rs       # Interface discovery & abstraction
-│   │       ├── socket.rs          # Low-level OS socket binding
-│   │       ├── independence.rs    # Shared-gateway detection algorithms
-│   │       ├── windows.rs         # Windows Winsock / IP Helper implementation
-│   │       ├── linux.rs           # Linux Netlink / SO_BINDTODEVICE
-│   │       └── android.rs         # Android JNI socket bindings
-│   ├── giga_db/                   # Persistence & state management
+│   │       ├── scorer.rs          # 11-metric Composite Health Score (CHS) engine
+│   │       ├── state_machine.rs   # 7-state hysteresis FSM & automatic exclusion
+│   │       ├── probes.rs          # Bound HTTP 204, captive portal & TCP RTT probes
+│   │       └── dns.rs             # hickory-resolver per-interface parallel DNS/DoH
+│   ├── giga_scheduler/            # Adaptive QoS & Work-Stealing Scheduler Brain
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       ├── lib.rs
-│   │       ├── schema.sql         # Base SQLite schema
-│   │       ├── migrations/        # Embedded SQLite migrations
-│   │       └── repository.rs      # CRUD operations
-│   └── giga_ffi/                  # UniFFI interface bindings for mobile/desktop
+│   │       ├── chunk_scheduler.rs # Dynamic chunk sizing, tail-stealing & split-on-exclude
+│   │       ├── flow_scheduler.rs  # Multi-class QoS (Interactive, Streaming, Bulk) & SD-WRR
+│   │       └── budget.rs          # Metered link & data cap enforcement
+│   ├── giga_transport/            # HTTP/2 Range Workers, Local Proxy & Smoltcp Stack
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── connector.rs       # Custom hyper 1.x + tokio-rustls + socket2 connector
+│   │       ├── worker.rs          # Per-interface HTTP Range worker
+│   │       ├── proxy.rs           # Local SOCKS5 / HTTP CONNECT proxy & SNI classifier
+│   │       ├── tun_stack.rs       # smoltcp user-space TCP terminator for VPN/TUN mode
+│   │       ├── reassembler.rs     # Pre-allocated sparse file writer
+│   │       └── integrity.rs       # SIMD SHA-256 & BLAKE3 verification engine
+│   ├── giga_mesh/                 # Cross-Device Phone <-> Laptop Wi-Fi Mesh Engine
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── discovery.rs       # mdns-sd zero-config LAN discovery & QR pairing
+│   │       ├── quic_tunnel.rs     # iroh / quinn mTLS 1.3 multiplexed QUIC streams
+│   │       └── peer_interface.rs  # RemotePeerInterface implementing NetworkInterface trait
+│   ├── giga_store/                # Persistence & ACID State Engine
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── redb_store.rs      # Pure-Rust redb + rkyv high-speed chunk/state store
+│   │       └── sqlite_audit.rs    # Optional sqlx SQLite historical telemetry export
+│   └── giga_ffi/                  # Mozilla UniFFI proc-macro bindings for Mobile
 │       ├── Cargo.toml
-│       ├── giga_core.udl          # UniFFI interface definition language
-│       └── src/
-│           └── lib.rs
+│       └── src/lib.rs
 ├── apps/
-│   ├── desktop/                   # Tauri 2 Desktop Application
+│   ├── desktop/                   # Tauri 2 Desktop App (React 19 + TS 5 + Tailwind 4 + uPlot)
 │   │   ├── src-tauri/
-│   │   └── src/                   # React 19 Frontend
-│   ├── android/                   # Native Android Jetpack Compose App
-│   └── cli/                       # Headless CLI management tool
+│   │   └── src/
+│   ├── android/                   # Native Android App (Kotlin 2.1 + Jetpack Compose + Material 3)
+│   └── cli/                       # Headless CLI & Daemon tool
 │       ├── Cargo.toml
 │       └── src/main.rs
-└── docs/                          # Architectural documentation & assets
+└── Docs/                          # Architectural specifications & engineering blueprints
 ```
 
 ---
@@ -1541,78 +1613,79 @@ To prevent CPU bottlenecks at multi-gigabit download speeds:
 
 ## 18. FUTURE FEATURES (POST-MVP ROADMAP)
 
+* **Cross-Device Phone $\leftrightarrow$ Laptop Wi-Fi Mesh (`giga_mesh`):** Connect a mobile phone and a laptop running WiFi GigaChad 420 over a single shared Wi-Fi network (or Wi-Fi Direct). The laptop discovers the phone via mDNS (`mdns-sd`) or QR pairing and establishes an encrypted, multiplexed QUIC tunnel (`iroh` / `quinn`). This allows the laptop to treat the phone's 5G cellular modem as a remote virtual network interface—aggregating the shared Wi-Fi router's WAN and the phone's 5G cellular connection simultaneously without disconnecting the phone from Wi-Fi or requiring a USB cable!
 * **BitTorrent Integration:** Extend the multi-interface socket binding engine to the BitTorrent protocol (distributing peer connections across interfaces).
-* **Browser WebExtensions:** Automated download interception for Chrome, Firefox, and Edge via Native Messaging.
-* **P2P Local Swarming:** Allow multiple WiFi GigaChad 420 instances on the same local network to share and swap completed chunks over LAN.
-* **Predictive AI Chunk Scheduling:** Train lightweight local models to predict cellular interface drops based on historical latency jitter and RSSI.
-* **Remote Aggregation Proxy (Cloud Bonding):** Deploy managed VPS aggregation servers enabling true L3 network bonding for non-ranged streams.
+* **Browser WebExtensions:** Automated download interception for Chrome, Firefox, Brave, and Edge via Native Messaging.
+* **P2P Local Swarming:** Allow multiple WiFi GigaChad 420 instances on the same local network to share and swap completed chunks over LAN at gigabit speeds.
+* **Predictive AI Chunk Scheduling:** Train lightweight local models to predict cellular interface drops based on historical latency jitter and RSSI divergence.
+* **Remote Aggregation Proxy (Cloud Bonding):** Deploy managed VPS aggregation servers enabling true L3 network bonding for non-ranged single TCP/UDP streams.
 
 ---
 
 ## 19. TECHNICAL DECISION RECORDS (ADRs)
 
-### ADR 001: Selection of Rust for the Shared Core Engine
+### ADR 001: Selection of Rust for the Shared Core Workspace
 * **Status:** Accepted
 * **Context:** The engine requires raw socket manipulation, zero-copy buffer handling, cross-platform compilation, and high-throughput concurrent I/O with zero garbage collection pauses.
-* **Decision:** Implement `giga_core` exclusively in Rust.
+* **Decision:** Implement the core workspace (`giga_pal`, `giga_inr`, `giga_scheduler`, `giga_transport`, `giga_mesh`, `giga_store`) exclusively in Rust.
 * **Alternatives Considered:** C++20 (lacks built-in memory safety guarantees), Go (runtime GC introduces jitter at gigabit throughput; difficult to package as a clean C-ABI library for Android/Tauri).
-* **Consequences:** Highly reliable, memory-safe engine; requires disciplined asynchronous lifecycle management.
+* **Consequences:** Highly reliable, memory-safe engine; 100% shared networking logic between Desktop and Mobile.
 
-### ADR 002: Tauri 2 over Electron for Desktop
+### ADR 002: Tauri 2 + React 19 + uPlot over Electron for Desktop
 * **Status:** Accepted
-* **Context:** The desktop UI requires rich data visualization without consuming excessive system resources.
-* **Decision:** Use Tauri 2 paired with React 19 and Vite.
-* **Alternatives Considered:** Electron (excessive memory footprint, slower IPC bridge, bundles full Chromium).
-* **Consequences:** Drastically smaller installers (~15MB vs ~120MB), lower RAM consumption (~40MB vs ~300MB), seamless native Rust integration.
+* **Context:** The desktop UI requires 60 FPS real-time telemetry visualization without consuming excessive system RAM or CPU.
+* **Decision:** Use Tauri 2 paired with React 19, Vite 6, Zustand, and `uPlot` + HTML5 `OffscreenCanvas`.
+* **Alternatives Considered:** Electron + Recharts (excessive memory footprint, slower IPC bridge, SVG chart lag at 20+ Hz updates).
+* **Consequences:** Drastically smaller installers (~15MB vs ~120MB), lower RAM consumption (~40MB vs ~300MB), <1% CPU overhead during live telemetry streaming.
 
-### ADR 003: Kotlin & Jetpack Compose for Android Presentation
+### ADR 003: Kotlin 2.1 & Jetpack Compose + C-NDK for Phone Presentation
 * **Status:** Accepted
-* **Context:** Android requires deep integration with OS-level lifecycle services and modern reactive UI patterns.
-* **Decision:** Build native Android UI using Kotlin and Jetpack Compose, linking to the compiled Rust engine via UniFFI.
-* **Alternatives Considered:** Flutter or React Native (adds another heavy intermediate engine layer on top of Rust).
-* **Consequences:** Full access to Android's `ConnectivityManager` and `VpnService` APIs with native performance.
+* **Context:** Mobile phones require deep integration with OS-level multi-network APIs (`ConnectivityManager`), `VpnService`, Wi-Fi Direct, and foreground services, while reusing the shared Rust networking core.
+* **Decision:** Build native mobile UI using Kotlin 2.1 and Jetpack Compose (Material 3, KMP-ready), linking to the Rust workspace via Mozilla `UniFFI` and binding sockets via Android's native C-NDK `android_setsocknetwork()`.
+* **Alternatives Considered:** Flutter or React Native (adds a heavy intermediate runtime on top of Rust and complicates `VpnService` / NDK file descriptor handoffs).
+* **Consequences:** Native 120Hz UI performance, direct C-speed socket binding, and effortless background service management.
 
-### ADR 004: HTTP Range Requests as Primary Acceleration Primitive
+### ADR 004: Custom Hyper 1.x + Tokio-Rustls + Socket2 Connector over Reqwest
 * **Status:** Accepted
-* **Context:** Accelerating downloads must work with existing public web infrastructure without requiring custom server software.
-* **Decision:** Rely on RFC 9110 HTTP Range Requests as the foundation of the MVP.
-* **Alternatives Considered:** Custom UDP protocols, MPTCP (Multipath TCP requires both client and server kernel support, which is absent on 99% of web CDNs).
-* **Consequences:** Maximum compatibility with real-world CDNs, ISO distributors, and file hosts.
+* **Context:** High-level HTTP clients (`reqwest`) abstract away socket creation, making it difficult to bind raw file descriptors to specific Android `Network` handles or Windows interface indices (`IP_UNICAST_IF`) prior to `connect()`, or to inspect kernel `TCP_INFO` metrics.
+* **Decision:** Implement a custom `tower::Service` connector using `hyper` 1.x, `tokio-rustls`, and `socket2`, paired with `hickory-resolver` for per-interface bound DNS.
+* **Alternatives Considered:** `reqwest` (insufficient pre-connect FD hooks), `curl-sys` (C cross-compilation burden).
+* **Consequences:** Complete control over every socket lifecycle stage, in-band TCP health telemetry, and immunity to dead-gateway DNS hangs.
 
-### ADR 005: SQLite for State Persistence
+### ADR 005: Pure-Rust `redb` + Optional SQLite for ACID State Persistence
 * **Status:** Accepted
-* **Context:** The engine needs ACID-compliant tracking of thousands of chunk boundaries to survive application crashes.
-* **Decision:** Use SQLite in WAL mode via `rusqlite`.
-* **Alternatives Considered:** Flat JSON files (high corruption risk during mid-write power loss), RocksDB (excessive binary footprint and complexity).
-* **Consequences:** Instant crash recovery, zero data loss, simple migration management.
+* **Context:** The engine needs ACID-compliant, non-blocking tracking of thousands of chunk boundaries and INR health events without C-compiler cross-compilation issues on Android NDK.
+* **Decision:** Use pure-Rust `redb` + `rkyv` for high-frequency chunk state persistence (with optional `sqlx` SQLite export for relational audit queries).
+* **Alternatives Considered:** Synchronous `rusqlite` (blocks Tokio async threads and requires bundling C SQLite), flat JSON files (corruption risk on crash).
+* **Consequences:** Zero C toolchain dependencies, 5–10x faster chunk state writes, instant crash recovery.
 
 ### ADR 006: Tokio Asynchronous Runtime
 * **Status:** Accepted
-* **Context:** The system needs to manage dozens of concurrent HTTP streams, socket timers, and disk writes concurrently without spawning hundreds of OS threads.
-* **Decision:** Use Tokio's multithreaded runtime.
-* **Alternatives Considered:** `async-std` (smaller ecosystem), thread-per-worker model (excessive OS thread context switching overhead).
-* **Consequences:** Industry-standard stability, vast ecosystem support, high performance.
+* **Context:** The system needs to manage dozens of concurrent HTTP streams, socket timers, INR probes, and disk writes concurrently without spawning hundreds of OS threads.
+* **Decision:** Use Tokio's multithreaded work-stealing runtime.
+* **Alternatives Considered:** `async-std`, thread-per-worker model.
+* **Consequences:** Industry-standard stability, vast ecosystem support, deterministic performance.
 
-### ADR 007: Shared Core via UniFFI
+### ADR 007: Cross-Device Wi-Fi Mesh via `iroh` / `quinn` (QUIC) and `mdns-sd`
 * **Status:** Accepted
-* **Context:** Maintaining separate networking engines in Rust for desktop and Kotlin for Android duplicates critical business logic.
-* **Decision:** Maintain one single engine in Rust; generate Android Kotlin bindings using Mozilla's UniFFI.
-* **Alternatives Considered:** Hand-written JNI (extremely error-prone and brittle).
-* **Consequences:** Single source of truth for scheduling and protocol handling across all platforms.
+* **Context:** Users frequently have a Laptop and a Phone connected to the same Wi-Fi router where the Phone also possesses an independent 5G cellular link. Enabling the Phone's native Wi-Fi Hotspot disconnects the Phone from the Wi-Fi router.
+* **Decision:** Implement `giga_mesh` using `mdns-sd` for LAN discovery and `iroh`/`quinn` (QUIC + mTLS 1.3) for device-to-device transport, exposing the paired Phone's 5G link as a `RemotePeerInterface` inside the Laptop's scheduler.
+* **Alternatives Considered:** Plain TCP sockets (head-of-line blocking across multiplexed chunks, no built-in encryption), USB-only tethering (requires physical cable).
+* **Consequences:** Seamless wireless bandwidth sharing between Phone and Laptop over any shared Wi-Fi network.
 
-### ADR 008: Unprivileged Socket Binding vs. Mandatory Kernel Drivers
+### ADR 008: Unprivileged Socket Binding & Local Proxy First, Virtual TUN / Kernel Drivers Second
 * **Status:** Accepted
-* **Context:** Developing kernel drivers (WFP on Windows, kernel modules on Linux) introduces enormous installation friction and security risks.
-* **Decision:** For the MVP, restrict networking to standard Layer 4 socket binding via OS user-space APIs.
-* **Alternatives Considered:** Immediate WFP driver development.
-* **Consequences:** Enables zero-install, standard-user operation across all supported operating systems.
+* **Context:** Mandatory kernel drivers introduce installation friction and OS signing requirements.
+* **Decision:** Default to unprivileged Layer 4 socket binding and local HTTP/SOCKS5 proxy + Browser Native Messaging; offer Virtual TUN (`WinTun` / `tun-rs` / Android `VpnService` + `smoltcp`) and eBPF/WFP as progressive opt-in tiers.
+* **Alternatives Considered:** Mandatory kernel driver installation on first launch.
+* **Consequences:** Zero-admin installation for core capabilities with a clean upgrade path to full system-wide capture.
 
-### ADR 009: Download-Level Segmentation vs. System-Wide Bonding
+### ADR 009: Honest Distinction Between Flow Distribution, Segmented Range Acceleration, and Single-Flow Bonding
 * **Status:** Accepted
-* **Context:** True system-wide bonding requires remote server aggregation to solve return-path asymmetry.
-* **Decision:** Scope the core product as an application-level download accelerator (Tier A & B). Relegate remote VPS bonding to an optional long-term vision (Tier C).
-* **Alternatives Considered:** Attempting to build an unassisted system-wide bonding engine (technically impossible over standard internet without a proxy).
-* **Consequences:** Delivers a realistic, deliverable product that solves real-world download bottlenecks today.
+* **Context:** Splitting a single non-ranged TCP connection across multiple public IPs violates TCP 4-tuple state on standard internet servers.
+* **Decision:** Clearly stratify system-wide optimization into Paradigm A (Flow Load Balancing with Domain Affinity), Paradigm B (RFC 9110 Range Splitting), Paradigm C (Remote VPS Multipath Bonding), and Paradigm D (Virtual Adapter/Proxy Capture).
+* **Alternatives Considered:** Blindly round-robining packets of a single TCP socket across NICs without a remote aggregator (causes immediate `TCP RST`).
+* **Consequences:** Prevents broken connections, preserves banking/TLS session affinity, and delivers maximum real-world speedups.
 
 ---
 
@@ -1628,23 +1701,24 @@ To prevent CPU bottlenecks at multi-gigabit download speeds:
    https://v2.tauri.app/
 5. **Mozilla UniFFI (Rust Cross-Platform Bindings):**  
    https://mozilla.github.io/uniffi-rs/
-6. **Android ConnectivityManager & Multi-Network APIs:**  
+6. **Android ConnectivityManager & Multi-Network NDK APIs:**  
    https://developer.android.com/reference/android/net/ConnectivityManager  
-   https://developer.android.com/reference/android/net/Network#bindSocket(java.io.FileDescriptor)
-7. **Microsoft Windows Filtering Platform (WFP) Architecture:**  
-   https://learn.microsoft.com/en-us/windows/win32/fwp/windows-filtering-platform-start-page
-8. **Linux Socket API Specification (`SO_BINDTODEVICE`):**  
-   https://man7.org/linux/man-pages/man7/socket.7.html
-9. **SQLite Write-Ahead Logging (WAL) Mode:**  
-   https://www.sqlite.org/wal.html
-10. **Reqwest & Hyper HTTP Client Frameworks:**  
-    https://docs.rs/reqwest/ | https://hyper.rs/
+   https://developer.android.com/ndk/reference/group/networking
+7. **Microsoft Windows Filtering Platform (WFP) & WinTun Architecture:**  
+   https://learn.microsoft.com/en-us/windows/win32/fwp/windows-filtering-platform-start-page  
+   https://www.wintun.net/
+8. **Linux Socket API (`SO_BINDTODEVICE`) & Aya Pure-Rust eBPF:**  
+   https://man7.org/linux/man-pages/man7/socket.7.html | https://aya-rs.dev/
+9. **Redb (Pure-Rust Embedded ACID Key-Value Store) & SQLite WAL:**  
+   https://www.redb.org/ | https://www.sqlite.org/wal.html
+10. **Hyper, Hickory-DNS, Smoltcp & Iroh/Quinn QUIC Frameworks:**  
+    https://hyper.rs/ | https://github.com/hickory-dns/hickory-dns | https://github.com/smoltcp-rs/smoltcp | https://iroh.computer/
 
 ---
 
 ## 21. ADDITIONAL FEATURE — INTELLIGENT NETWORK RESOLVER (INR) & SYSTEM-WIDE INTERNET OPTIMIZATION
 
-This section extends **WiFi GigaChad 420** beyond segmented file download acceleration into a **System-Wide Intelligent Network Aggregation, Health Resolution, and Traffic Optimization Platform**.
+This section extends **WiFi GigaChad 420** beyond segmented file download acceleration into a **System-Wide Intelligent Network Aggregation, Health Resolution, Cross-Device Mesh, and Traffic Optimization Platform**.
 
 ---
 
@@ -1652,26 +1726,26 @@ This section extends **WiFi GigaChad 420** beyond segmented file download accele
 
 Standard operating systems evaluate network connectivity using simplistic binary checks (e.g., whether a local DHCP lease is active or whether a single HTTP probe to a portal detection URL succeeds) and prioritize interfaces using static administrative metrics (e.g., Ethernet metric 10, Wi-Fi metric 20). Consequently, an OS will stubbornly route all traffic into a dead ISP gateway with a strong Wi-Fi signal ("zombie Wi-Fi") while ignoring a healthy 5G cellular link or secondary Wi-Fi adapter with lower RSSI.
 
-The **Intelligent Network Resolver (INR)** (`giga_net::resolver`) is a continuous, asynchronous, multi-dimensional telemetry and scoring subsystem that evaluates every physical and logical network interface in real time to determine its actual internet suitability.
+The **Intelligent Network Resolver (INR)** (`giga_inr`) is a continuous, asynchronous, multi-dimensional telemetry and scoring subsystem that evaluates every physical, logical, and mesh network interface in real time to determine its actual internet suitability.
 
 ```mermaid
-graph TD
+flowchart TD
     subgraph OS_Telemetry ["Layer 1/2/3 Passive OS Telemetry"]
-        L1["Wi-Fi 802.11 RSSI / SNR / Link Speed"]
+        L1["Wi-Fi 802.11 RSSI, SNR & PHY Rate"]
         L2["Interface Availability & OperState"]
         L3["Metered Status & Data Cap Counters"]
     end
 
-    subgraph Active_Probes ["Layer 4/7 Active Probe Engine (Bound Per Interface)"]
-        DNS_P["Bound UDP/TCP DNS Resolution Probe"]
-        ICMP_P["TCP SYN / ICMP Echo RTT & Loss Probe"]
-        HTTP_P["Captive Portal & HTTP/2 Reachability Probe"]
-        BW_P["Passive Goodput & Congestion Analyzer"]
+    subgraph Active_Probes ["Layer 4/7 Active Probe Engine (Strictly Bound Per Interface)"]
+        DNS_P["Hickory Bound UDP/DoH DNS Probe"]
+        ICMP_P["TCP SYN / HTTP 204 RTT & Loss Probe"]
+        HTTP_P["Captive Portal & TLS Reachability Probe"]
+        BW_P["Passive TCP_INFO Goodput & Bufferbloat Analyzer"]
     end
 
-    subgraph INR_Core ["Intelligent Network Resolver (INR)"]
+    subgraph INR_Core ["Intelligent Network Resolver (giga_inr)"]
         Collector["Telemetry Aggregator & Ring Buffer"]
-        Scorer["Composite Health Scoring Engine (CHS)"]
+        Scorer["Composite Health Scoring Engine (CHS 0-100)"]
         FSM["Hysteresis State Machine (7 States)"]
         Exclusion["Automatic Exclusion & Failover Controller"]
     end
@@ -1679,8 +1753,8 @@ graph TD
     subgraph Consumers ["Downstream Consumers"]
         Scheduler["Adaptive Multi-Dimensional Traffic Scheduler"]
         ChunkEngine["Segmented Download Worker Pool"]
-        SysRouter["System-Wide Proxy / TUN / WFP Dispatcher"]
-        UI_Diag["Real-Time UI Telemetry & Event Logger"]
+        SysRouter["System-Wide Proxy / TUN / eBPF / WFP Router"]
+        UI_Diag["Real-Time UI Telemetry & Audit Event Logger"]
     end
 
     L1 --> Collector
@@ -1762,31 +1836,31 @@ To prevent rapid oscillation ("flapping") when a wireless connection hovers near
 stateDiagram-v2
     [*] --> Discovered : OS Enumerates NIC
 
-    Discovered --> Testing : Valid IP & Gateway Assigned
-    Discovered --> Offline : Link Down / Cable Unplugged
+    Discovered --> Testing : Valid IP and Gateway Assigned
+    Discovered --> Offline : Link Down or Cable Unplugged
 
-    Testing --> Active : 3 Consecutive Probes Pass & CHS >= 65
-    Testing --> Degraded : Probes Pass with Warnings (40 <= CHS < 65)
-    Testing --> Excluded : Captive Portal / 100% Loss / CHS < 40 (3x)
+    Testing --> Active : 3 Consecutive Probes Pass and CHS at least 65
+    Testing --> Degraded : Probes Pass with Moderate CHS 40 to 64
+    Testing --> Excluded : Captive Portal or 100 pct Loss or CHS below 40
     Testing --> Offline : Physical Link Lost
 
-    Active --> Degraded : CHS < 55 for >= 4s OR Loss > 5%
-    Active --> Excluded : 3 Consecutive Probe Timeouts OR CHS < 30 for >= 3s
-    Active --> Offline : OS Link Down Event (Immediate)
+    Active --> Degraded : CHS below 55 for 4s or Loss above 5 pct
+    Active --> Excluded : 3 Probe Timeouts or CHS below 30 for 3s
+    Active --> Offline : OS Link Down Event
 
-    Degraded --> Active : CHS >= 70 Sustained for >= 10s (Hysteresis)
-    Degraded --> Excluded : CHS < 35 for >= 5s OR Timeout Streak >= 3
-    Degraded --> Offline : OS Link Down Event (Immediate)
+    Degraded --> Active : CHS at least 70 Sustained for 10s Hysteresis
+    Degraded --> Excluded : CHS below 35 for 5s or Timeout Streak 3
+    Degraded --> Offline : OS Link Down Event
 
-    Excluded --> Recovering : Background Probe Succeeds & CHS >= 60
+    Excluded --> Recovering : Background Probe Succeeds and CHS at least 60
     Excluded --> Offline : OS Link Down Event
 
-    Recovering --> Active : N=5 Consecutive Probes Pass (CHS >= 70 for >= 15s)
-    Recovering --> Degraded : N=5 Probes Pass with Moderate Quality (50 <= CHS < 70)
-    Recovering --> Excluded : Any Probe Fails or CHS Drops < 50 (Backoff Doubled)
+    Recovering --> Active : 5 Consecutive Probes Pass with CHS at least 70 for 15s
+    Recovering --> Degraded : 5 Probes Pass with Moderate CHS 50 to 69
+    Recovering --> Excluded : Any Probe Fails or CHS Drops below 50
     Recovering --> Offline : OS Link Down Event
 
-    Offline --> Discovered : OS Link Up & Address Acquired
+    Offline --> Discovered : OS Link Up and Address Acquired
 ```
 
 *Figure 21.2: 7-State Network Health State Machine with asymmetric entry/exit hysteresis thresholds and mandatory dwell windows.*
@@ -1944,19 +2018,19 @@ Extending multi-interface optimization from file downloads to general system int
 #### 21.5.1 Architectural Taxonomy: Approaches A, B, C, and D
 
 ```mermaid
-graph TB
-    subgraph Apps ["System & Application Traffic Sources"]
-        Web["Web Browsing & REST APIs (Many Short HTTPS Flows)"]
-        DL["Large File Transfers & Browser Downloads (HTTP Range)"]
-        VOD["Adaptive Video Streaming (HLS / DASH Segments)"]
-        Arbitrary["Single Long-Lived TCP / WebSockets / Gaming / Non-Range"]
+flowchart TB
+    subgraph Apps ["System and Application Traffic Sources"]
+        Web["Web Browsing and REST APIs (Short HTTPS Flows)"]
+        DL["Large File Transfers and Browser Downloads (HTTP Range)"]
+        VOD["Adaptive Video Streaming (HLS and DASH Segments)"]
+        Arbitrary["Single Long-Lived TCP, WebSockets, Gaming, Non-Range"]
     end
 
     subgraph Modes ["WiFi GigaChad 420 Optimization Paradigms"]
-        ModeA["Paradigm A: Multi-Interface Flow Distribution<br/>(Connection-Level Load Balancing across Sockets)"]
-        ModeB["Paradigm B: Segmented Object Acceleration<br/>(RFC 9110 Byte-Range Splitting)"]
-        ModeC["Paradigm C: Transparent Single-Flow Bonding<br/>(Multipath Tunnel + Remote Aggregation Server)"]
-        ModeD["Paradigm D: System-Wide Virtual Adapter / Proxy Integration<br/>(Local HTTP/SOCKS5 Proxy, TUN/VPN, WFP Callout)"]
+        ModeA["Paradigm A: Multi-Interface Flow Distribution (Connection Load Balancing)"]
+        ModeB["Paradigm B: Segmented Object Acceleration (RFC 9110 Byte-Range Splitting)"]
+        ModeC["Paradigm C: Transparent Single-Flow Bonding (Multipath Tunnel + Remote VPS)"]
+        ModeD["Paradigm D: System-Wide Virtual Adapter and Proxy Integration (SOCKS5, TUN, WFP)"]
     end
 
     Web --> ModeD
@@ -1964,9 +2038,9 @@ graph TB
     VOD --> ModeD
     Arbitrary --> ModeD
 
-    ModeD -->|Independent Connections| ModeA
-    ModeD -->|Range-Capable Payloads & HLS Segments| ModeB
-    ModeD -->|Single Indivisible TCP Stream| ModeC
+    ModeD -->|"Independent Connections"| ModeA
+    ModeD -->|"Range-Capable Payloads and HLS Segments"| ModeB
+    ModeD -->|"Single Indivisible TCP Stream"| ModeC
 ```
 
 *Figure 21.3: Classification of system-wide traffic into Paradigms A, B, C, and D.*
@@ -2055,39 +2129,39 @@ $$W_{i, c} = \Psi_{\text{state}}(i) \cdot \Psi_{\text{cap}}(i, c) \cdot \Psi_{\t
 ```mermaid
 sequenceDiagram
     autonumber
-    participant App as OS Application (Browser / Video / App)
-    participant Intercept as System Interceptor (Local Proxy / TUN / WFP)
-    participant Classifier as Flow & SNI Classifier
+    participant App as OS Application
+    participant Intercept as System Interceptor
+    participant Classifier as Flow and SNI Classifier
     participant INR as Intelligent Network Resolver
     participant Sched as Adaptive Scheduler
-    participant NIC1 as Interface 1 (Wi-Fi: Active, CHS=88)
-    participant NIC2 as Interface 2 (5G USB: Active, CHS=79)
-    participant NIC3 as Interface 3 (Wan2: Excluded, CHS=12)
+    participant NIC1 as NIC1 Wi-Fi Active CHS 88
+    participant NIC2 as NIC2 5G Mesh Active CHS 79
+    participant NIC3 as NIC3 WAN2 Excluded CHS 12
 
-    App->>Intercept: Outbound Connection / HTTP Request
+    App->>Intercept: Outbound Connection or HTTP Request
     Intercept->>Classifier: Inspect Protocol, SNI, Content-Length, Range Support
-    Classifier->>INR: Query Live Interface Pool & Health States
-    INR-->>Classifier: NIC1 (Active), NIC2 (Active), NIC3 (Excluded - Dead WAN)
+    Classifier->>INR: Query Live Interface Pool and Health States
+    INR-->>Classifier: NIC1 Active, NIC2 Active, NIC3 Excluded Dead WAN
 
     alt Case 1: Large File or Range-Capable Media Segment (Paradigm B)
         Classifier->>Sched: Request Multi-Interface Segmented Dispatch
         par Parallel Bound Range Workers
-            Sched->>NIC1: GET Range: bytes=0-16777215 (Weight 65%)
-            Sched->>NIC2: GET Range: bytes=16777216-25165823 (Weight 35%)
+            Sched->>NIC1: GET Range bytes 0-16777215 (Weight 65 pct)
+            Sched->>NIC2: GET Range bytes 16777216-25165823 (Weight 35 pct)
         end
         Note over NIC3: NIC3 Excluded (0 chunks assigned)
         NIC1-->>Intercept: Stream Segment 1
         NIC2-->>Intercept: Stream Segment 2
         Intercept-->>App: Reassembled Ordered Byte Stream
-    else Case 2: Interactive Web / HTTPS Flow (Paradigm A)
-        Classifier->>Sched: Select Best Interface (Class::Interactive + Domain Affinity)
-        Sched->>NIC1: Bind Socket & Connect (Lowest RTT & Highest Stability)
+    else Case 2: Interactive Web or HTTPS Flow (Paradigm A)
+        Classifier->>Sched: Select Best Interface (Interactive Class + Domain Affinity)
+        Sched->>NIC1: Bind Socket and Connect (Lowest RTT and Highest Stability)
         NIC1-->>Intercept: TLS Application Data
         Intercept-->>App: Proxy Response Stream
     else Case 3: Active Interface Degrades Mid-Transfer
         Note over NIC1: NIC1 Loses Upstream Internet (3 Timeouts)
-        INR->>Sched: Transition NIC1 -> Excluded
-        Sched->>NIC2: Evacuate Pending Chunks & Re-bind Next Requests to NIC2
+        INR->>Sched: Transition NIC1 to Excluded
+        Sched->>NIC2: Evacuate Pending Chunks and Re-bind Next Requests to NIC2
         NIC2-->>Intercept: Seamless Continuation
     end
 ```
@@ -2233,6 +2307,66 @@ To maintain engineering discipline and ship reliable software iteratively, the I
 | **7-State Machine & Exclusion** | Complete 7-state machine (`Discovered`, `Testing`, `Active`, `Degraded`, `Excluded`, `Offline`, `Recovering`) with configurable hysteresis, automatic chunk splitting, and canary recovery. | Per-application exclusion policies, automated data-cap budget enforcement, and UI live state-transition timeline. | Optional opt-in hardware adapter reset for hung USB modems on Windows/Linux. |
 | **Adaptive Traffic Scheduler** | Throughput + RTT + Loss + Metered-aware dynamic chunk scheduler for segmented downloads (`Class::BulkDownload`). | Multi-class QoS scheduler (`Interactive`, `Streaming`, `BulkDownload`) with Sticky Deficit Weighted Round-Robin (SD-WRR) and Domain Affinity pinning. | Congestion-control-aware packet pacing (BBRv3-inspired subflow scheduler). |
 | **System-Wide Traffic Optimization** | Segmented HTTP/HTTPS file downloads via Desktop UI, Android UI, CLI, and Browser Extension Native Messaging handoff (Paradigm B). | **Local HTTP/SOCKS5 Forward Proxy** (`127.0.0.1:8080`), **Multi-Interface Parallel DNS**, HLS/DASH video segment acceleration, and **Android `VpnService`** (`tun0`) user-space flow router (Paradigms A, B, D). | **Windows WFP Kernel Callout / WinTun**, **Linux eBPF / `nftables` TPROXY**, and **Remote Cloud Aggregation Server (MPTCP / Multi-WireGuard VPS)** for single-stream TCP/UDP bonding (Paradigms C & D). |
+| **Cross-Device Phone-Laptop Mesh** | Modular `NetworkInterface` trait designed for remote peer extensibility. | **`giga_mesh` LAN Discovery (`mdns-sd` + QR Pairing) & QUIC Tunnel (`iroh` / `quinn`)**: Laptop bonds shared Wi-Fi WAN + Phone's 5G Cellular over the common Wi-Fi LAN without USB cables. | Multi-peer LAN P2P chunk swarming across 3+ laptops/phones and Wi-Fi Direct (`WifiP2pManager`) zero-router mesh. |
+
+---
+
+### 21.13 Cross-Device Phone $\leftrightarrow$ Laptop Wi-Fi Mesh Architecture (`giga_mesh`)
+
+A frequent real-world bottleneck occurs when a user has a **Laptop** and a **Mobile Phone** connected to the **same Wi-Fi router** (e.g., campus Wi-Fi or home broadband):
+* The Laptop only has a single physical Wi-Fi card.
+* The Phone is connected to that **same Wi-Fi**, *and* simultaneously possesses a high-speed **5G Cellular** connection.
+* Normally, enabling the Phone's native "Wi-Fi Hotspot" forces the Phone to **disconnect from the Wi-Fi router** to broadcast its own SSID, preventing the user from using both the router's Wi-Fi WAN and the Phone's 5G WAN without a physical USB cable.
+
+**`giga_mesh`** solves this entirely in software: both the Laptop and the Phone stay connected to the common Wi-Fi network. They discover each other over the local Wi-Fi LAN (or Wi-Fi Direct if AP isolation is active) and establish an encrypted, low-latency **QUIC Mesh Tunnel (`iroh` / `quinn`)**.
+
+```mermaid
+flowchart LR
+    subgraph Laptop ["Laptop (Tauri 2 + giga_core)"]
+        L_Sched["Adaptive Scheduler (giga_scheduler)"]
+        L_NIC["Laptop Wi-Fi NIC (10.18.25.130)"]
+        L_VirtualPeer["RemotePeerInterface (peer://phone-5g)"]
+    end
+
+    subgraph Shared_LAN ["Shared Local Wi-Fi Router (e.g., Campus / Home Wi-Fi)"]
+        Router_LAN["802.11ax Local WLAN Switch (300+ Mbps LAN)"]
+        Router_WAN["Router Broadband WAN Uplink"]
+    end
+
+    subgraph Phone ["Mobile Phone (Android + giga_core)"]
+        P_WiFi["Phone Wi-Fi NIC (10.18.25.142)"]
+        P_Mesh["giga_mesh QUIC Relay Daemon"]
+        P_5G["Phone 5G Cellular Modem (android_setsocknetwork)"]
+    end
+
+    subgraph Internet ["Public Internet / CDN Origin"]
+        Origin["Remote Server (HTTP Range / Web / Streaming)"]
+    end
+
+    L_Sched -->|"50 pct Traffic (Direct Socket)"| L_NIC
+    L_Sched -->|"50 pct Traffic (QUIC Stream)"| L_VirtualPeer
+
+    L_NIC -->|"Path 1: Standard WAN"| Router_LAN
+    Router_LAN --> Router_WAN --> Origin
+
+    L_VirtualPeer -->|"Path 2: Local LAN QUIC (iroh/quinn)"| Router_LAN
+    Router_LAN -->|"1-2 ms LAN Hop"| P_WiFi
+    P_WiFi --> P_Mesh
+    P_Mesh -->|"Bound to 5G Network Handle"| P_5G
+    P_5G -->|"5G Cellular Carrier WAN"| Origin
+```
+
+*Figure 21.5: Cross-Device Wi-Fi Mesh (`giga_mesh`) enabling a Laptop with only one Wi-Fi card to bond the local Wi-Fi router's WAN and a paired Phone's 5G cellular modem simultaneously over the shared Wi-Fi LAN.*
+
+#### 21.13.1 Mesh Discovery, Pairing & Transport Protocol
+1. **Zero-Config Discovery & AP-Isolation Fallback:**
+   - **Primary (mDNS):** Both devices broadcast `_gigachad-mesh._udp.local.` via `mdns-sd` on the shared Wi-Fi subnet.
+   - **Fallback (QR Code + Wi-Fi Direct):** On university/enterprise networks with **Wireless Client Isolation (AP Isolation)** where devices on the same SSID cannot ping each other directly, scanning a QR code displayed on the Desktop UI triggers an automatic **Wi-Fi Direct (`WifiP2pManager` / Windows Wi-Fi Direct)** peer-to-peer link or `iroh` hole-punched relay while keeping both devices associated with the main router.
+2. **Cryptographic Mutual Authentication (Zero-Trust LAN):**
+   - Pairing exchanges Ed25519 public keys (`NodeId`) via QR code or 6-digit SPAKE2+ PIN. All local Wi-Fi mesh traffic is encrypted with **TLS 1.3 (mTLS)** over QUIC so other users on a public/campus Wi-Fi cannot eavesdrop on or inject traffic into the Phone $\leftrightarrow$ Laptop bridge.
+3. **Unified `NetworkInterface` Trait Integration:**
+   - The Phone continuously runs `giga_inr` on its 5G Cellular interface and streams its live `TelemetrySnapshot` (5G CHS score, RTT, goodput EMA, and cellular data cap remaining) to the Laptop over a lightweight QUIC control stream every $500\text{ ms}$.
+   - To the Laptop's `AdaptiveScheduler`, `RemotePeerInterface` is just another `Active` interface in the pool!
 
 ---
 *End of Master Technical Specification — WiFi GigaChad 420.*
