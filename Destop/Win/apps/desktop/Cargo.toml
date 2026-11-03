@@ -1,0 +1,27 @@
+[package]
+name = "giga-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Windows Desktop Control Center & Background Daemon for WiFi GigaChad 420"
+
+[[bin]]
+name = "giga-desktop"
+path = "src/main.rs"
+
+[dependencies]
+giga_pal = { workspace = true }
+giga_inr = { workspace = true }
+giga_scheduler = { workspace = true }
+giga_transport = { workspace = true }
+giga_store = { workspace = true }
+giga_mesh = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }

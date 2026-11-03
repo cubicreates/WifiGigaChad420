@@ -1,0 +1,16 @@
+[package]
+name = "giga_store"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Crash-safe download state persistence, random-access file assembly, and NIST SHA-256 verification"
+
+[dependencies]
+giga_scheduler = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

@@ -1,0 +1,20 @@
+[package]
+name = "giga_transport"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Interface-bound HTTP/HTTPS Multi-Path Range Downloader and Local SOCKS5/HTTP System Proxy"
+
+[dependencies]
+giga_pal = { workspace = true }
+giga_inr = { workspace = true }
+giga_scheduler = { workspace = true }
+giga_store = { workspace = true }
+tokio = { workspace = true }
+socket2 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

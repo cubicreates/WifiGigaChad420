@@ -1,0 +1,50 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/giga_pal",
+    "crates/giga_inr",
+    "crates/giga_scheduler",
+    "crates/giga_transport",
+    "crates/giga_store",
+    "crates/giga_mesh",
+    "apps/cli",
+    "apps/desktop",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+authors = ["cubicreates <blubrdpirts@gmail.com>"]
+license = "GPL-3.0"
+repository = "https://github.com/cubicreates/WifiGigaChad420"
+
+[workspace.dependencies]
+anyhow = "1.0"
+tokio = { version = "1.40", features = ["full"] }
+socket2 = { version = "0.5", features = ["all"] }
+bytes = "1.7"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+async-trait = "0.1"
+futures = "0.3"
+clap = { version = "4.5", features = ["derive"] }
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Networking_WinSock",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_NetworkManagement_WiFi",
+    "Win32_System_IO",
+] }
+
+# Internal workspace crates
+giga_pal = { path = "crates/giga_pal" }
+giga_inr = { path = "crates/giga_inr" }
+giga_scheduler = { path = "crates/giga_scheduler" }
+giga_transport = { path = "crates/giga_transport" }
+giga_store = { path = "crates/giga_store" }
+giga_mesh = { path = "crates/giga_mesh" }
