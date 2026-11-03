@@ -40,10 +40,10 @@ Standard operating systems (Windows, Linux, macOS, Android) route all outbound i
 | Capability | Technical Summary |
 | :--- | :--- |
 | **Multi-Interface Segmented Acceleration** | Partitions large HTTP/HTTPS transfers (RFC 9110 `Range: bytes=X-Y`), adaptive video segments (HLS/DASH), and software packages across all healthy interfaces concurrently via explicit per-socket binding (`socket2`, `IP_UNICAST_IF`, `SO_BINDTODEVICE`, Android C-NDK `android_setsocknetwork`). |
-| **Intelligent Network Resolver (INR)** | Continuously evaluates every network interface (`CHS 0–100`) across **11 dimensions**: upstream WAN reachability, captive portal status, bound DNS latency, RTT, jitter, packet loss, empirical goodput EMA, bufferbloat ($\Delta RTT$), link stability, metered budgets, and Wi-Fi RSSI. |
-| **7-State Machine & Zero-Loss Failover** | Automatically transitions degraded or unreachable links to `Excluded` within $\le 3.0\text{s}$. Preserves $100\%$ of flushed 256 KiB disk blocks, splits in-flight byte ranges, and reassigns remaining segments to healthy links with hysteresis anti-flap protection. |
+| **Intelligent Network Resolver (INR)** | Continuously evaluates every network interface (`CHS 0–100`) across **11 dimensions**: upstream WAN reachability, captive portal status, bound DNS latency, RTT, jitter, packet loss, empirical goodput EMA, bufferbloat (`ΔRTT`), link stability, metered budgets, and Wi-Fi RSSI. |
+| **7-State Machine & Zero-Loss Failover** | Automatically transitions degraded or unreachable links to `Excluded` within `≤ 3.0s`. Preserves `100%` of flushed 256 KiB disk blocks, splits in-flight byte ranges, and reassigns remaining segments to healthy links with hysteresis anti-flap protection. |
 | **System-Wide Internet Optimization** | Extends multi-interface routing to web browsing, API requests, streaming, and desktop/mobile applications via **Multi-Interface Parallel DNS (`hickory-resolver`)**, **Local HTTP/SOCKS5 Loopback Proxy**, and **Virtual TUN (`WinTun`, `tun-rs`, Android `VpnService` + `smoltcp`)** with TLS SNI Domain Affinity. |
-| **Cross-Device Phone $\leftrightarrow$ Laptop Wi-Fi Mesh** | Bridges a Phone and Laptop over a **single shared Wi-Fi network** using mDNS discovery and encrypted **QUIC (`iroh` / `quinn`)**. Enables the Laptop to aggregate the local Wi-Fi router's WAN and the Phone's 5G cellular connection wirelessly at the same time. |
+| **Cross-Device Phone ↔ Laptop Wi-Fi Mesh** | Bridges a Phone and Laptop over a **single shared Wi-Fi network** using mDNS discovery and encrypted **QUIC (`iroh` / `quinn`)**. Enables the Laptop to aggregate the local Wi-Fi router's WAN and the Phone's 5G cellular connection wirelessly at the same time. |
 | **Zero-Copy Sparse Disk Engine** | Pre-allocates target files (`fallocate` / `SetFileInformationByHandle`) and executes concurrent, lock-free positional disk writes (`pwrite`) with streaming SIMD **SHA-256 and BLAKE3** cryptographic verification. |
 
 ---
@@ -118,14 +118,21 @@ stateDiagram-v2
     Offline --> Discovered : OS Link Up and Address Acquired
 ```
 
-### Composite Health Score ($CHS$) Formulation
-Every eligible interface $i$ is evaluated on a normalized scale $S_i \in [0, 100]$:
+### Composite Health Score (`CHS`) Formulation
+Every eligible interface `i` is evaluated on a normalized scale `S_i ∈ [0, 100]`:
 
-$$S_i = 0.30\,\Phi_{\text{loss}}(L_i) + 0.20\,\Phi_{\text{rtt}}(RTT_i, J_i) + 0.20\,\Phi_{\text{tput}}(B_i) + 0.15\,\Phi_{\text{stab}}(\sigma_i, F_i) + 0.10\,\Phi_{\text{cong}}(\Delta RTT_i) + 0.05\,\Phi_{\text{wifi}}(RSSI_i)$$
+```text
+S_i = 0.30 * Φ_loss(L_i)
+    + 0.20 * Φ_rtt(RTT_i, J_i)
+    + 0.20 * Φ_tput(B_i)
+    + 0.15 * Φ_stab(σ_i, F_i)
+    + 0.10 * Φ_cong(ΔRTT_i)
+    + 0.05 * Φ_wifi(RSSI_i)
+```
 
 ---
 
-## Cross-Device Phone $\leftrightarrow$ Laptop Wi-Fi Mesh (`giga_mesh`)
+## Cross-Device Phone ↔ Laptop Wi-Fi Mesh (`giga_mesh`)
 
 When a Laptop with a single Wi-Fi adapter and a Mobile Phone are connected to the same residential or campus Wi-Fi network, `giga_mesh` bonds both devices without requiring USB cables or disconnecting the Phone from Wi-Fi:
 
@@ -162,9 +169,9 @@ flowchart LR
 
 ## Mathematical Acceleration Model
 
-Consider a **10 GB** ($10,000\text{ MB}$) payload transferred across three independent paths:
+Consider a **10 GB** (`10,000 MB`) payload transferred across three independent paths:
 
-| Interface | Medium | Goodput ($B_i$) | RTT | Scheduler Allocation ($R_i$) |
+| Interface | Medium | Goodput (`B_i`) | RTT | Scheduler Allocation (`R_i`) |
 | :--- | :--- | :--- | :--- | :--- |
 | **`eth0`** | Gigabit Fiber LAN | `200 Mbps` (25.0 MB/s) | 12 ms | **57.1%** (~5.71 GB) |
 | **`wlan0`** | 5 GHz Wi-Fi 6 | `100 Mbps` (12.5 MB/s) | 28 ms | **28.6%** (~2.86 GB) |
@@ -231,7 +238,7 @@ WifiGigaChad420/
 - [ ] **Phase 3:** `apps/desktop` — Tauri 2 + React 19 + `uPlot` + `OffscreenCanvas` GigaMap visualizer (Windows & Linux)
 - [ ] **Phase 4:** `apps/android` — Kotlin 2.1 + Jetpack Compose + NDK simultaneous Wi-Fi & 5G acceleration
 - [ ] **Phase 5:** System-Wide Optimization — Local HTTP/SOCKS5 proxy, Browser Native Messaging extension, Parallel DNS & Android `VpnService`
-- [ ] **Phase 6:** `giga_mesh` — Wireless Phone $\leftrightarrow$ Laptop 5G-over-Wi-Fi QUIC Mesh & P2P LAN swarming
+- [ ] **Phase 6:** `giga_mesh` — Wireless Phone ↔ Laptop 5G-over-Wi-Fi QUIC Mesh & P2P LAN swarming
 - [ ] **Phase 7:** Kernel & Cloud Bonding — Windows WinTun/WFP, Linux `aya` eBPF & optional remote VPS multipath aggregator
 
 ---

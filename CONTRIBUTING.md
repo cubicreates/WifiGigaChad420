@@ -23,7 +23,7 @@ All core networking, health resolution, scheduling, and mesh logic resides in th
 | Crate / Directory | Responsibility |
 | :--- | :--- |
 | `crates/giga_pal` | **Platform Abstraction Layer:** OS socket binding (`socket2`, `IP_UNICAST_IF`, `SO_BINDTODEVICE`, Android C-NDK `android_setsocknetwork`), Wi-Fi RSSI telemetry (`wlanapi`, `nl80211`), shared-gateway ARP/STUN checks, and TUN/eBPF hooks. |
-| `crates/giga_inr` | **Intelligent Network Resolver:** 11-metric Composite Health Score ($CHS$), 7-state hysteresis state machine (`Discovered`, `Testing`, `Active`, `Degraded`, `Excluded`, `Offline`, `Recovering`), captive portal detection, and `hickory-resolver` bound parallel DNS. |
+| `crates/giga_inr` | **Intelligent Network Resolver:** 11-metric Composite Health Score (`CHS`), 7-state hysteresis state machine (`Discovered`, `Testing`, `Active`, `Degraded`, `Excluded`, `Offline`, `Recovering`), captive portal detection, and `hickory-resolver` bound parallel DNS. |
 | `crates/giga_scheduler` | **Adaptive Traffic & Chunk Brain:** Work-stealing HTTP Range chunk scheduler, zero-loss in-flight chunk splitting on exclusion, multi-class QoS (`Interactive`, `Streaming`, `BulkDownload`), and metered data-cap enforcement. |
 | `crates/giga_transport` | **Transport & Proxy Engine:** Custom `hyper` 1.x + `tokio-rustls` + `socket2` connector, local `127.0.0.1:8080` SOCKS5/HTTP proxy, SNI domain-affinity classifier, `smoltcp` user-space TCP terminator, and sparse file reassembler. |
 | `crates/giga_mesh` | **Cross-Device Mesh:** `mdns-sd` LAN discovery, QR/SPAKE2+ pairing, and `iroh`/`quinn` mTLS 1.3 QUIC streams turning a Phone's 5G modem into a `RemotePeerInterface` for a Laptop over shared Wi-Fi. |
@@ -70,7 +70,7 @@ When submitting a Pull Request, your code **must** respect these core rules:
 1. **No Pure-C Dependencies in Core Crates Unless Strictly Gated:** Keep `giga_inr`, `giga_scheduler`, `giga_transport`, `giga_mesh`, and `giga_store` 100% pure Rust (`tokio-rustls`, `redb`, `hickory-resolver`, `quinn`) so cross-compiling to Android NDK and Windows never breaks on missing CMake/OpenSSL toolchains.
 2. **Never Block Tokio Async Threads:** File I/O (`pwrite` / sparse pre-allocation) must use async positional I/O or `tokio::task::spawn_blocking`. Never call blocking OS network APIs on the async reactor thread.
 3. **Never Rely Solely on Wi-Fi RSSI for Health:** Any modification to `giga_inr` must preserve the separation between physical signal strength and active upstream WAN validation.
-4. **Preserve Completed Bytes on Interface Exclusion:** When an interface transitions to `Excluded`, already-flushed disk blocks ($\ge 256\text{ KiB}$) must be preserved via chunk splitting—never discard a partially downloaded 64 MiB chunk from byte zero.
+4. **Preserve Completed Bytes on Interface Exclusion:** When an interface transitions to `Excluded`, already-flushed disk blocks (`≥ 256 KiB`) must be preserved via chunk splitting—never discard a partially downloaded 64 MiB chunk from byte zero.
 5. **No Hardware Adapter Disabling by Default:** Exclusion must remain strictly in user-space/routing-space unless the user explicitly triggers an opt-in hardware reset.
 
 ---

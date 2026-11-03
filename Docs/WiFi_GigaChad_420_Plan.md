@@ -92,24 +92,28 @@ The system:
 
 ### 1.4 Detailed Mathematical Acceleration Model
 
-Consider a 10 GB ($10 \times 10^9$ bytes $\approx 9,536.74\text{ MiB}$) distribution:
+Consider a 10 GB (`10 × 10^9` bytes `≈ 9,536.74 MiB`) distribution:
 
-| Interface Identifier | Physical Medium | Local IP Address | Measured Goodput ($B_i$) | Latency (RTT) | Target Allocation ($R_i$) |
+| Interface Identifier | Physical Medium | Local IP Address | Measured Goodput (`B_i`) | Latency (RTT) | Target Allocation (`R_i`) |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Interface 1 (`if0`)** | Gigabit Ethernet | `192.168.1.10` | 200 Mbps (25.0 MB/s) | 12 ms | 57.14% (~5.71 GB) |
 | **Interface 2 (`if1`)** | 5 GHz Wi-Fi 6 | `192.168.50.15`| 100 Mbps (12.5 MB/s) | 28 ms | 28.57% (~2.86 GB) |
 | **Interface 3 (`if2`)** | 4G LTE USB Modem| `192.168.8.100` | 50 Mbps (6.25 MB/s)  | 65 ms | 14.29% (~1.43 GB) |
 
-$$\text{Aggregate Theoretical Bandwidth } B_{\text{total}} = \sum_{i=1}^{N} B_i = 200 + 100 + 50 = 350\text{ Mbps } (43.75\text{ MB/s})$$
+```text
+Aggregate Theoretical Bandwidth (B_total) = Σ B_i = 200 + 100 + 50 = 350 Mbps (43.75 MB/s)
 
-$$\text{Theoretical Duration } T_{\text{optimal}} = \frac{10,000\text{ MB}}{43.75\text{ MB/s}} \approx 228.57\text{ seconds } (\sim 3.81\text{ minutes})$$
+Theoretical Duration (T_optimal)          = 10,000 MB / 43.75 MB/s ≈ 228.57 seconds (~3.81 minutes)
+```
 
 Compared against single-interface execution:
-* Ethernet alone: $\frac{10,000\text{ MB}}{25.0\text{ MB/s}} = 400.0\text{ seconds } (\sim 6.67\text{ minutes})$ $\rightarrow$ **$1.75\times$ Speedup**
-* Wi-Fi alone: $\frac{10,000\text{ MB}}{12.5\text{ MB/s}} = 800.0\text{ seconds } (\sim 13.33\text{ minutes})$ $\rightarrow$ **$3.50\times$ Speedup**
+* Ethernet alone: `10,000 MB / 25.0 MB/s = 400.0 seconds (~6.67 minutes)` → **`1.75x` Speedup**
+* Wi-Fi alone: `10,000 MB / 12.5 MB/s = 800.0 seconds (~13.33 minutes)` → **`3.50x` Speedup**
 
-Accounting for real-world protocol overhead ($\eta \approx 0.94$ due to TCP slow-start, TLS renegotiation, chunk boundary scheduling delay, and sparse disk I/O):
-$$T_{\text{practical}} = \frac{T_{\text{optimal}}}{\eta} \approx \frac{228.57}{0.94} \approx 243.16\text{ seconds } (\sim 4.05\text{ minutes})$$
+Accounting for real-world protocol overhead (`η ≈ 0.94` due to TCP slow-start, TLS renegotiation, chunk boundary scheduling delay, and sparse disk I/O):
+```text
+Practical Duration (T_practical)          = T_optimal / η ≈ 228.57 / 0.94 ≈ 243.16 seconds (~4.05 minutes)
+```
 
 ---
 
@@ -159,7 +163,7 @@ The project roadmap spans from a dedicated download manager to an autonomous, cr
 
 ## 3. TECH STACK (UPGRADED MODULAR & FUTURE-PROOF ARCHITECTURE)
 
-To guarantee maximum throughput, zero garbage-collection pauses, effortless cross-compilation (zero C/C++ toolchain headaches), and future extensibility into **Cross-Device Laptop $\leftrightarrow$ Phone Wi-Fi Mesh Bonding**, the system is engineered around a **100% shared, modular 5-crate Rust workspace** paired with native-grade Desktop and Mobile shells.
+To guarantee maximum throughput, zero garbage-collection pauses, effortless cross-compilation (zero C/C++ toolchain headaches), and future extensibility into **Cross-Device Laptop ↔ Phone Wi-Fi Mesh Bonding**, the system is engineered around a **100% shared, modular 5-crate Rust workspace** paired with native-grade Desktop and Mobile shells.
 
 ```mermaid
 flowchart TB
@@ -207,9 +211,9 @@ flowchart TB
 | **Language & Runtime** | **Rust (2024 Edition) + Tokio (`rt-multi-thread`)** | Core system, async task scheduling, timers, lock-free concurrency | Zero-cost abstractions, memory safety without GC jitter, deterministic resource cleanup across Desktop and Mobile. |
 | **HTTP & Socket Engine** | **`hyper` 1.x + `hyper-util` + `tokio-rustls` + `socket2`** | Low-level HTTP/1.1 & HTTP/2 client, custom `tower::Service` connector, pre-connect socket binding | Replaces `reqwest`. Exposes raw socket file descriptors *before* `connect()`, which is mandatory for Android `android_setsocknetwork`, Windows `IP_UNICAST_IF`, and reading kernel `TCP_INFO` RTT/loss in-band. |
 | **Smart Per-NIC DNS** | **`hickory-resolver` (Custom Bound RuntimeProvider)** | Per-interface bound UDP/TCP/DoH/DoT DNS resolution & parallel hedging | Replaces OS default DNS (`getaddrinfo`), which ignores socket binding and hangs when the primary Wi-Fi router loses upstream WAN. |
-| **User-Space TCP & TUN** | **`smoltcp` (or `netstack-lwip`) + `tun-rs` + `wintun`** | Layer 3 $\rightarrow$ Layer 4 user-space TCP termination for system-wide VPN/TUN mode | Terminates local OS application flows captured via virtual `tun0` adapter and re-dispatches them over multiple bound physical sockets without requiring a remote VPS. |
+| **User-Space TCP & TUN** | **`smoltcp` (or `netstack-lwip`) + `tun-rs` + `wintun`** | Layer 3 → Layer 4 user-space TCP termination for system-wide VPN/TUN mode | Terminates local OS application flows captured via virtual `tun0` adapter and re-dispatches them over multiple bound physical sockets without requiring a remote VPS. |
 | **Local Proxy Engine** | **`fast-socks5` + `hyper` HTTP `CONNECT` Proxy** | Unprivileged `127.0.0.1:8080` loopback forward proxy & TLS SNI inspection | Enables zero-admin browser, CLI, and app acceleration with domain-affinity sticky routing and zero TLS MITM. |
-| **Cross-Device Mesh** | **`iroh` / `quinn` (QUIC + mTLS 1.3) + `mdns-sd`** | Connects Phone $\leftrightarrow$ Laptop over shared Wi-Fi or Wi-Fi Direct as a unified mesh | Turns a paired Phone on the same Wi-Fi into a remote 5G virtual interface for the Laptop using multiplexed, encrypted QUIC streams. |
+| **Cross-Device Mesh** | **`iroh` / `quinn` (QUIC + mTLS 1.3) + `mdns-sd`** | Connects Phone ↔ Laptop over shared Wi-Fi or Wi-Fi Direct as a unified mesh | Turns a paired Phone on the same Wi-Fi into a remote 5G virtual interface for the Laptop using multiplexed, encrypted QUIC streams. |
 | **ACID Persistence** | **`redb` (Pure-Rust Embedded KV Store) + `rkyv`** *(with `sqlx` SQLite optional)* | Crash-safe chunk bitmaps, download state, INR health history, data cap budgets | 100% pure Rust (zero C compiler / Android NDK cross-compile friction), fully async-compatible, 5–10x faster than synchronous `rusqlite` for high-frequency chunk commits. |
 | **Buffer Management** | **`bytes::Bytes` & `BytesMut`** | Zero-copy packet & chunk slicing across network sockets and disk writers | Reference-counted memory slices prevent heap allocation churn at multi-gigabit speeds. |
 | **Cryptography** | **`aws-lc-rs` + `sha2` (SIMD) + `blake3`** | TLS 1.3 crypto backend, end-to-end SHA-256 verification, and fast peer chunk hashing | `aws-lc-rs` is the modern, high-speed cryptographic backend for `rustls`; `blake3` verifies peer-to-peer mesh chunks at >4 GB/s. |
@@ -230,7 +234,7 @@ flowchart TB
 * **Architecture & Reactive State:** **MVI (Model-View-Intent) + Kotlin Coroutines / `StateFlow` + `Hilt` Dependency Injection**.
 * **Native OS & NDK Networking Integration:**
   - `android.net.ConnectivityManager` (`requestNetwork` keeping Wi-Fi, 5G Cellular, and USB OTG Ethernet active simultaneously).
-  - **Native C-NDK Socket Binding (`<android/multinetwork.h>` $\rightarrow$ `android_setsocknetwork(net_handle_t, int fd)`):** Allows Rust worker threads to bind sockets directly to Android `Network` handles at native C speed without round-tripping through Java JNI on every connection.
+  - **Native C-NDK Socket Binding (`<android/multinetwork.h>` → `android_setsocknetwork(net_handle_t, int fd)`):** Allows Rust worker threads to bind sockets directly to Android `Network` handles at native C speed without round-tripping through Java JNI on every connection.
   - `android.net.VpnService`: Captures system-wide mobile app traffic into a virtual `tun0` file descriptor handed directly to Rust (`tun-rs` + `smoltcp`).
   - `android.net.wifi.p2p.WifiP2pManager` + `NsdManager`: Supports mDNS LAN discovery and Wi-Fi Direct P2P bridging with the Desktop app even when campus Wi-Fi enables AP client isolation.
   - `ForegroundService` (`connectedDevice` | `dataSync` | `specialUse`): Ensures uninterrupted background execution when accelerating downloads or acting as a 5G Mesh Relay for a paired Laptop.
@@ -668,7 +672,7 @@ Validation Criteria:
 * `ETag` and `Last-Modified`: Stored as session tokens to ensure byte consistency throughout the download lifecycle.
 
 #### 5.1.2 Segment Request Construction
-When requesting segment $k$ spanning inclusive offsets $[S_k, E_k]$:
+When requesting segment `k` spanning inclusive offsets `[S_k, E_k]`:
 ```http
 GET /files/payload.iso HTTP/1.1
 Host: cdn.example.com
@@ -698,11 +702,13 @@ If the origin responds with `HTTP 200 OK` instead of `HTTP 206 Partial Content`,
 
 #### 5.2.2 The Adaptive Bounded Sizing Architecture (MVP Recommendation)
 WiFi GigaChad 420 implements a **Hybrid Adaptive Window** approach:
-* Chunks are bounded between $C_{\min} = 4\text{ MiB}$ and $C_{\max} = 64\text{ MiB}$.
-* Default initial chunk size: $C_{\text{init}} = 8\text{ MiB}$.
-* The scheduler computes the target chunk size $C_{i}$ for interface $i$ dynamically, such that each chunk represents roughly $\tau = 2.0\text{ seconds}$ of projected transfer time based on that interface's current Exponential Moving Average throughput ($EMA_i$):
+* Chunks are bounded between `C_min = 4 MiB` and `C_max = 64 MiB`.
+* Default initial chunk size: `C_init = 8 MiB`.
+* The scheduler computes the target chunk size `C_i` for interface `i` dynamically, such that each chunk represents roughly `τ = 2.0 seconds` of projected transfer time based on that interface's current Exponential Moving Average throughput (`EMA_i`):
 
-$$C_{i} = \text{clamp}\left( EMA_i \times \tau, \; C_{\min}, \; C_{\max} \right)$$
+```text
+C_i = clamp(EMA_i * τ, C_min, C_max)
+```
 
 * Boundary alignment: Chunk offsets are strictly aligned to 64 KiB boundaries to optimize OS virtual memory page cache flushing and underlying storage sector write operations.
 
@@ -711,12 +717,14 @@ $$C_{i} = \text{clamp}\left( EMA_i \times \tau, \; C_{\min}, \; C_{\max} \right)
 The scheduling engine implements a lock-free priority queue of unallocated chunks alongside an active worker registry:
 1. **Initial Ramp-up:** Each interface is assigned two chunks concurrently (HTTP/1.1 pipeline / HTTP/2 multiplexed) to saturate TCP window scaling.
 2. **Dynamic Work Claiming:** As soon as an interface completes a chunk, it calculates its updated EMA throughput:
-   $$EMA_{t} = \alpha \cdot \text{Speed}_{\text{instant}} + (1 - \alpha) \cdot EMA_{t-1} \quad (\text{where } \alpha = 0.3)$$
-   The worker immediately claims the next available chunk from the global queue sized proportionally to its new $EMA$.
-3. **Straggler Mitigation (Tail-Stealing):** When all unallocated chunks are exhausted, the scheduler evaluates all currently in-flight chunks. If an interface $J$ is projected to take $t_{\text{remaining}} > 5.0\text{ seconds}$, and a fast interface $K$ becomes idle:
-   - Interface $K$ calculates the unread portion of Interface $J$'s chunk.
-   - If the unread portion exceeds $2 \times C_{\min}$ (8 MiB), the scheduler truncates Interface $J$'s range and creates a new sub-chunk covering the upper byte range, assigning it to Interface $K$.
-   - Interface $J$ is instructed to terminate its stream once it reaches the new truncated boundary.
+   ```text
+   EMA_t = α * Speed_instant + (1 - α) * EMA_{t-1}    (where α = 0.3)
+   ```
+   The worker immediately claims the next available chunk from the global queue sized proportionally to its new `EMA`.
+3. **Straggler Mitigation (Tail-Stealing):** When all unallocated chunks are exhausted, the scheduler evaluates all currently in-flight chunks. If an interface `J` is projected to take `t_remaining > 5.0 seconds`, and a fast interface `K` becomes idle:
+   - Interface `K` calculates the unread portion of Interface `J`'s chunk.
+   - If the unread portion exceeds `2 * C_min` (8 MiB), the scheduler truncates Interface `J`'s range and creates a new sub-chunk covering the upper byte range, assigning it to Interface `K`.
+   - Interface `J` is instructed to terminate its stream once it reaches the new truncated boundary.
 
 ### 5.4 Edge Cases & Adverse Server Handling
 
@@ -724,8 +732,8 @@ The scheduling engine implements a lock-free priority queue of unallocated chunk
 | :--- | :--- | :--- |
 | **No Range Support** | Response status is `200` instead of `206`, or `Accept-Ranges` missing. | Abort multi-interface dispatch. Revert to single stream on interface with lowest gateway metric. Notify user via UI. |
 | **File Mutation Mid-Download** | `ETag` changes or `Last-Modified` differs on sub-chunk request. | Terminate all active workers immediately. Flush corrupted sparse file. Invalidate SQLite session. Restart download from byte 0. |
-| **IP-Bound Connections** | Server permits only one IP per session (returns 403 Forbidden on secondary interfaces). | Detect 403 on interface $N$. Quarantine interface $N$ for this host. Continue download utilizing remaining connections on primary interface. |
-| **Rate Limiting (HTTP 429 / 503)** | Response header `Retry-After` or HTTP status 429. | Exponential backoff on that specific interface worker. Back off by $2^n \times 500\text{ms}$. Throttle worker concurrency on that interface. |
+| **IP-Bound Connections** | Server permits only one IP per session (returns 403 Forbidden on secondary interfaces). | Detect 403 on interface `N`. Quarantine interface `N` for this host. Continue download utilizing remaining connections on primary interface. |
+| **Rate Limiting (HTTP 429 / 503)** | Response header `Retry-After` or HTTP status 429. | Exponential backoff on that specific interface worker. Back off by `2^n * 500ms`. Throttle worker concurrency on that interface. |
 | **Connection Reset / Drop** | Socket error `ECONNRESET`, `ETIMEDOUT`, or broken pipe. | Mark active chunk as `ORPHANED` in SQLite. Return chunk to head of priority queue. Worker attempts socket re-binding. |
 | **Truncated Byte Payload** | Inbound stream closes before reaching requested `Content-Range` end. | Verify received byte count. Mark completed sub-segment as valid; generate new chunk for missing tail bytes. |
 
@@ -1101,14 +1109,14 @@ apps/android/
 The desktop application is built on Tauri 2, uniting a high-performance Rust core with a responsive web-based UI.
 
 #### 9.1.1 IPC Event & Command Channel
-* **Commands (UI $\rightarrow$ Rust):** Invoked asynchronously via `@tauri-apps/api/core`.
+* **Commands (UI → Rust):** Invoked asynchronously via `@tauri-apps/api/core`.
   - `start_download(url, options)`
   - `pause_download(download_id)`
   - `resume_download(download_id)`
   - `cancel_download(download_id)`
   - `get_interface_metrics()`
   - `update_interface_settings(settings)`
-* **Events (Rust $\rightarrow$ UI):** High-frequency event streams emitted at a throttled rate (max 10 Hz) using `tauri::Emitter` to avoid UI rendering starvation:
+* **Events (Rust → UI):** High-frequency event streams emitted at a throttled rate (max 10 Hz) using `tauri::Emitter` to avoid UI rendering starvation:
   - `download-progress`: Contains byte offsets, chunk states, and instantaneous throughput.
   - `interface-state-changed`: Emitted when adapters are connected or lost.
   - `download-completed`: Signals final file verification and disk flush.
@@ -1544,9 +1552,9 @@ WifiGigaChad420/
 
 ### 14.2 Rigorous Test Scenarios
 
-1. **Clean Dual-Interface Speedup:** Connect to two distinct mock servers capped at 100 Mbps each. Verify combined download achieves $\ge 190\text{ Mbps}$.
+1. **Clean Dual-Interface Speedup:** Connect to two distinct mock servers capped at 100 Mbps each. Verify combined download achieves `≥ 190 Mbps`.
 2. **Sudden Link Termination:** Download a 5 GB file across Interface 1 and 2. Forcibly disable Interface 1 at 50% progress. Verify Interface 2 detects orphan chunks, absorbs remaining payload, and completes file without corruption.
-3. **Severe Asymmetry:** Interface 1 = 200 Mbps (10ms RTT); Interface 2 = 5 Mbps (150ms RTT). Verify the adaptive scheduler allocates $>95\%$ of chunks to Interface 1 and avoids tail-straggler delays.
+3. **Severe Asymmetry:** Interface 1 = 200 Mbps (10ms RTT); Interface 2 = 5 Mbps (150ms RTT). Verify the adaptive scheduler allocates `> 95%` of chunks to Interface 1 and avoids tail-straggler delays.
 4. **Range Rejection Fallback:** Server returns `HTTP 200 OK` on a ranged `GET`. Verify engine safely aborts segmentation, cancels secondary workers, and downloads via single connection.
 5. **Mid-Stream Content Mutation:** Server changes `ETag` halfway through download. Verify engine detects hash mismatch, aborts, wipes partial disk state, and notifies user.
 6. **Crash & Recovery:** Kill application process (`SIGKILL` / `taskkill /F`) at 60% completion of a 10 GB file. Relaunch application. Verify SQLite detects existing sparse chunks, validates physical offsets, and resumes seamlessly from byte 60%.
@@ -1588,10 +1596,10 @@ To prevent CPU bottlenecks at multi-gigabit download speeds:
 
 | Metric | Target Specification |
 | :--- | :--- |
-| **Throughput Efficiency** | $\ge 92\%$ of aggregate theoretical bandwidth across healthy links |
-| **Memory Footprint (Desktop)** | $\le 120\text{ MB}$ RAM during active 1 Gbps multi-interface download |
-| **Memory Footprint (Android)** | $\le 65\text{ MB}$ RAM under heavy download load |
-| **CPU Utilization** | $\le 6\%$ on modern 8-core CPU at 500 Mbps download speed |
+| **Throughput Efficiency** | `≥ 92%` of aggregate theoretical bandwidth across healthy links |
+| **Memory Footprint (Desktop)** | `≤ 120 MB` RAM during active 1 Gbps multi-interface download |
+| **Memory Footprint (Android)** | `≤ 65 MB` RAM under heavy download load |
+| **CPU Utilization** | `≤ 6%` on modern 8-core CPU at 500 Mbps download speed |
 | **Storage Write Bottleneck** | Capable of saturating SATA and NVMe SSD write limits |
 
 ---
@@ -1613,7 +1621,7 @@ To prevent CPU bottlenecks at multi-gigabit download speeds:
 
 ## 18. FUTURE FEATURES (POST-MVP ROADMAP)
 
-* **Cross-Device Phone $\leftrightarrow$ Laptop Wi-Fi Mesh (`giga_mesh`):** Connect a mobile phone and a laptop running WiFi GigaChad 420 over a single shared Wi-Fi network (or Wi-Fi Direct). The laptop discovers the phone via mDNS (`mdns-sd`) or QR pairing and establishes an encrypted, multiplexed QUIC tunnel (`iroh` / `quinn`). This allows the laptop to treat the phone's 5G cellular modem as a remote virtual network interface—aggregating the shared Wi-Fi router's WAN and the phone's 5G cellular connection simultaneously without disconnecting the phone from Wi-Fi or requiring a USB cable!
+* **Cross-Device Phone ↔ Laptop Wi-Fi Mesh (`giga_mesh`):** Connect a mobile phone and a laptop running WiFi GigaChad 420 over a single shared Wi-Fi network (or Wi-Fi Direct). The laptop discovers the phone via mDNS (`mdns-sd`) or QR pairing and establishes an encrypted, multiplexed QUIC tunnel (`iroh` / `quinn`). This allows the laptop to treat the phone's 5G cellular modem as a remote virtual network interface—aggregating the shared Wi-Fi router's WAN and the phone's 5G cellular connection simultaneously without disconnecting the phone from Wi-Fi or requiring a USB cable!
 * **BitTorrent Integration:** Extend the multi-interface socket binding engine to the BitTorrent protocol (distributing peer connections across interfaces).
 * **Browser WebExtensions:** Automated download interception for Chrome, Firefox, Brave, and Edge via Native Messaging.
 * **P2P Local Swarming:** Allow multiple WiFi GigaChad 420 instances on the same local network to share and swap completed chunks over LAN at gigabit speeds.
@@ -1778,26 +1786,26 @@ flowchart TD
 *Figure 21.1: Intelligent Network Resolver (INR) architecture combining passive OS link telemetry with strictly bound active probes, feeding the Composite Health Scorer and Hysteresis State Machine.*
 
 #### 21.1.1 The 11 Evaluation Dimensions
-The INR evaluates each discovered interface $i$ across 11 orthogonal metrics:
+The INR evaluates each discovered interface `i` across 11 orthogonal metrics:
 
 | # | Metric Dimension | Measurement Mechanism | Role in Eligibility & Scoring |
 | :--- | :--- | :--- | :--- |
 | **1** | **Interface Availability** | OS Netlink (`RTM_NEWLINK`) / Windows IP Helper (`NotifyIpInterfaceChange`) / Android `NetworkCallback`. | Hard gate. Interface must be `UP`, possess a valid routable IPv4/IPv6 address, and have a reachable gateway. |
 | **2** | **Internet Connectivity** | Bound TCP handshake (`SYN`/`SYN-ACK`) and HTTP `204 No Content` probe to distributed anycast endpoints (`1.1.1.1:443`, `8.8.8.8:443`). | Hard gate. Strong Wi-Fi with zero WAN reachability is immediately flagged as unhealthy (`Excluded` / `Offline`). |
 | **3** | **Captive Portal Status** | Bound HTTP GET to `http://connectivitycheck.gstatic.com/generate_204` (or `cp.cloudflare.com`). | Hard gate. If response is `HTTP 302`/`200` with HTML body or mismatched TLS certificate, interface is quarantined as `CAPTIVE_PORTAL`. |
-| **4** | **DNS Resolution** | Bound UDP/53 and DoH resolver query directly through the interface's assigned DNS servers and fallback anycast resolvers. | Evaluates DNS lookup latency ($T_{\text{dns}}$) and `SERVFAIL`/timeout rate. Interfaces with broken local DNS transparently fall back to bound DoH/DoT resolvers. |
-| **5** | **Latency (RTT)** | Moving window ($W = 20$ samples) of TCP/HTTP Round-Trip Time ($RTT_{\min}, RTT_{\text{avg}}, \sigma_{\text{jitter}}$). | Critical for interactive traffic (web browsing, DNS, streaming start) and BDP window sizing. |
-| **6** | **Packet Loss** | Sliding window loss ratio ($L \in [0.0, 1.0]$) from probe timeouts and TCP retransmission counters (`TCP_INFO` on Linux/Android, `GetPerTcpConnectionEStats` on Windows). | Exponentially penalizes health score; packet loss $> 5\%$ severely degrades TCP Reno/CUBIC throughput. |
+| **4** | **DNS Resolution** | Bound UDP/53 and DoH resolver query directly through the interface's assigned DNS servers and fallback anycast resolvers. | Evaluates DNS lookup latency (`T_dns`) and `SERVFAIL`/timeout rate. Interfaces with broken local DNS transparently fall back to bound DoH/DoT resolvers. |
+| **5** | **Latency (RTT)** | Moving window (`W = 20` samples) of TCP/HTTP Round-Trip Time (`RTT_min`, `RTT_avg`, `σ_jitter`). | Critical for interactive traffic (web browsing, DNS, streaming start) and BDP window sizing. |
+| **6** | **Packet Loss** | Sliding window loss ratio (`L ∈ [0.0, 1.0]`) from probe timeouts and TCP retransmission counters (`TCP_INFO` on Linux/Android, `GetPerTcpConnectionEStats` on Windows). | Exponentially penalizes health score; packet loss `> 5%` severely degrades TCP Reno/CUBIC throughput. |
 | **7** | **Actual Throughput** | Passive tracking of socket read/write byte counters (`EMA_goodput`) combined with micro-burst capacity estimation. | Measures real-world goodput rather than misleading 802.11 physical PHY link rates. |
-| **8** | **Network Congestion** | Bufferbloat detection via queuing delay inflation: $\Delta RTT = RTT_{\text{loaded}} - RTT_{\min}$. | Detects saturated uplinks/downlinks before packet loss occurs (CAKE/CoDel style delay sensing). |
+| **8** | **Network Congestion** | Bufferbloat detection via queuing delay inflation: `ΔRTT = RTT_loaded - RTT_min`. | Detects saturated uplinks/downlinks before packet loss occurs (CAKE/CoDel style delay sensing). |
 | **9** | **Connection Stability** | Link flap counter, IP lease churn, and standard deviation of throughput/jitter over a 60-second window. | Prevents flaky links from oscillating into the active pool via exponential penalty decay. |
-| **10** | **Wi-Fi RSSI & Signal** | OS WLAN APIs (`WlanQueryInterface` on Windows, `nl80211` on Linux, `WifiInfo.getRssi()` on Android). | **Advisory modifier only ($5\%$ weight).** Used as a leading indicator of impending roam/drop, never as a standalone proxy for internet health. |
+| **10** | **Wi-Fi RSSI & Signal** | OS WLAN APIs (`WlanQueryInterface` on Windows, `nl80211` on Linux, `WifiInfo.getRssi()` on Android). | **Advisory modifier only (`5%` weight).** Used as a leading indicator of impending roam/drop, never as a standalone proxy for internet health. |
 | **11** | **Metered & Data Caps** | OS metered flags (`NetworkCapabilities.NET_CAPABILITY_NOT_METERED`, Windows Cost API) + user-configured byte budgets. | Governs scheduling cost weights and prevents background bulk transfers from exhausting cellular plans. |
 
 > [!IMPORTANT]
 > **Decoupling Signal Strength from Internet Health:**
-> * **Scenario A (Strong Wi-Fi, Dead WAN):** A router has -42 dBm RSSI (5 bars), `PHY = 1200 Mbps`, but the upstream fiber modem is unplugged. Passive RSSI is 100%, but active probes fail ($100\%$ packet loss). The INR classifies the interface as **`Excluded` (Reason: `NoUpstreamInternet`)**.
-> * **Scenario B (Weak Wi-Fi / Cellular, Reliable WAN):** A 5G hotspot or distant Wi-Fi AP has -81 dBm RSSI (1–2 bars), but exhibits $0\%$ packet loss, $24\text{ ms}$ RTT, and steady $35\text{ Mbps}$ goodput. The INR classifies the interface as **`Active`** and schedules traffic proportionally to its empirical capacity.
+> * **Scenario A (Strong Wi-Fi, Dead WAN):** A router has -42 dBm RSSI (5 bars), `PHY = 1200 Mbps`, but the upstream fiber modem is unplugged. Passive RSSI is 100%, but active probes fail (`100%` packet loss). The INR classifies the interface as **`Excluded` (Reason: `NoUpstreamInternet`)**.
+> * **Scenario B (Weak Wi-Fi / Cellular, Reliable WAN):** A 5G hotspot or distant Wi-Fi AP has -81 dBm RSSI (1–2 bars), but exhibits `0%` packet loss, `24 ms` RTT, and steady `35 Mbps` goodput. The INR classifies the interface as **`Active`** and schedules traffic proportionally to its empirical capacity.
 
 ---
 
@@ -1806,25 +1814,32 @@ The INR evaluates each discovered interface $i$ across 11 orthogonal metrics:
 #### 21.2.1 Adaptive Two-Tier Probing Protocol
 To avoid wasting bandwidth or waking mobile radios unnecessarily, the INR combines **Passive In-Band Telemetry** with **Low-Overhead Active Probing**:
 
-1. **When Traffic is Actively Flowing (`Active` with $> 64\text{ KB/s}$ throughput):**
-   - Passive socket hooks inspect kernel TCP socket statistics (`tcp_info` RTT, RTT variance, retransmits) and HTTP response headers every $500\text{ ms}$.
-   - Active probes are throttled down to once every $15\text{ seconds}$ strictly to verify DNS and baseline unloaded latency.
+1. **When Traffic is Actively Flowing (`Active` with `> 64 KB/s` throughput):**
+   - Passive socket hooks inspect kernel TCP socket statistics (`tcp_info` RTT, RTT variance, retransmits) and HTTP response headers every `500 ms`.
+   - Active probes are throttled down to once every `15 seconds` strictly to verify DNS and baseline unloaded latency.
 2. **When Interface is Idle, `Testing`, `Degraded`, or `Recovering`:**
-   - Lightweight probes (< 250 bytes per probe) execute at adaptive intervals ($2.0\text{ s}$ in `Testing`/`Degraded`, exponential backoff from $5\text{ s} \to 60\text{ s}$ in `Excluded`).
+   - Lightweight probes (< 250 bytes per probe) execute at adaptive intervals (`2.0 s` in `Testing`/`Degraded`, exponential backoff from `5 s → 60 s` in `Excluded`).
    - Every probe socket is explicitly bound (`bind()` / `SO_BINDTODEVICE` / `Network.bindSocket()`) to the target interface so the OS routing table cannot redirect the probe over a healthy default gateway.
 
-#### 21.2.2 Mathematical Composite Health Score ($CHS$)
-For any interface $i$ passing the three **Hard Gates** (Link Up, No Captive Portal, Reachable Internet $\text{Loss} < 100\%$), the INR computes a normalized **Composite Health Score** $S_i \in [0, 100]$:
+#### 21.2.2 Mathematical Composite Health Score (`CHS`)
+For any interface `i` passing the three **Hard Gates** (Link Up, No Captive Portal, Reachable Internet `Loss < 100%`), the INR computes a normalized **Composite Health Score** `S_i ∈ [0, 100]`:
 
-$$S_i = w_L \cdot \Phi_{\text{loss}}(L_i) + w_R \cdot \Phi_{\text{rtt}}(RTT_i, J_i) + w_T \cdot \Phi_{\text{tput}}(B_i) + w_S \cdot \Phi_{\text{stab}}(\sigma_i, F_i) + w_C \cdot \Phi_{\text{cong}}(\Delta RTT_i) + w_W \cdot \Phi_{\text{wifi}}(RSSI_i)$$
+```text
+S_i = w_L * Φ_loss(L_i)
+    + w_R * Φ_rtt(RTT_i, J_i)
+    + w_T * Φ_tput(B_i)
+    + w_S * Φ_stab(σ_i, F_i)
+    + w_C * Φ_cong(ΔRTT_i)
+    + w_W * Φ_wifi(RSSI_i)
+```
 
-Where the weights sum to $1.0$:
-* Packet Loss Reliability ($w_L = 0.30$): $\Phi_{\text{loss}}(L_i) = 100 \times (1 - L_i)^4$ (rapidly penalizes loss: $2\%$ loss $\rightarrow 92.2$, $10\%$ loss $\rightarrow 65.6$, $30\%$ loss $\rightarrow 24.0$).
-* Latency & Jitter Score ($w_R = 0.20$): $\Phi_{\text{rtt}} = 100 \times \exp\left(-\frac{\max(0, RTT_i - 15\text{ms})}{150\text{ms}}\right) \times \exp\left(-\frac{J_i}{50\text{ms}}\right)$.
-* Empirical Goodput Score ($w_T = 0.20$): $\Phi_{\text{tput}} = 100 \times \min\left(1.0, \frac{\log_{10}(1 + B_i\text{ [Mbps]})}{\log_{10}(1 + 1000)}\right)$.
-* Connection Stability ($w_S = 0.15$): $\Phi_{\text{stab}} = 100 \times \exp(-0.5 \cdot F_{\text{flaps}}) \times (1 - \min(1.0, CV_{\text{tput}}))$.
-* Congestion / Bufferbloat ($w_C = 0.10$): $\Phi_{\text{cong}} = 100 \times \exp\left(-\frac{\max(0, RTT_{\text{loaded}} - RTT_{\min})}{100\text{ms}}\right)$.
-* Wi-Fi Signal Modifier ($w_W = 0.05$): For Ethernet/USB, $\Phi_{\text{wifi}} = 100$. For Wi-Fi/Cellular, $\Phi_{\text{wifi}} = \text{clamp}\left(\frac{RSSI_i + 95}{45} \times 100, 0, 100\right)$.
+Where the weights sum to `1.0`:
+* **Packet Loss Reliability (`w_L = 0.30`):** `Φ_loss(L_i) = 100 * (1 - L_i)^4` (rapidly penalizes loss: `2%` loss → `92.2`, `10%` loss → `65.6`, `30%` loss → `24.0`).
+* **Latency & Jitter Score (`w_R = 0.20`):** `Φ_rtt = 100 * exp(-max(0, RTT_i - 15ms) / 150ms) * exp(-J_i / 50ms)`.
+* **Empirical Goodput Score (`w_T = 0.20`):** `Φ_tput = 100 * min(1.0, log10(1 + B_i [Mbps]) / log10(1 + 1000))`.
+* **Connection Stability (`w_S = 0.15`):** `Φ_stab = 100 * exp(-0.5 * F_flaps) * (1 - min(1.0, CV_tput))`.
+* **Congestion / Bufferbloat (`w_C = 0.10`):** `Φ_cong = 100 * exp(-max(0, RTT_loaded - RTT_min) / 100ms)`.
+* **Wi-Fi Signal Modifier (`w_W = 0.05`):** For Ethernet/USB, `Φ_wifi = 100`. For Wi-Fi/Cellular, `Φ_wifi = clamp(((RSSI_i + 95) / 45) * 100, 0, 100)`.
 
 ---
 
@@ -1870,12 +1885,12 @@ stateDiagram-v2
 | State | Eligibility for Traffic | Probe Interval | Description & Entry/Exit Criteria |
 | :--- | :--- | :--- | :--- |
 | **`Discovered`** | None | Immediate | Newly enumerated interface by OS. Awaiting valid L3 IP assignment and route table entry. |
-| **`Testing`** | Diagnostic Probes Only | $1.0\text{ s}$ | Initial qualification phase. Executes gateway ARP/independence check, captive portal check, DNS check, and 3 baseline RTT/throughput probes. |
-| **`Active`** | Full Eligibility (100% Weight) | $15.0\text{ s}$ (Passive $0.5\text{ s}$) | Healthy interface ($CHS \ge 65$). Receives new download chunks and application connections according to Adaptive Scheduler weights. |
-| **`Degraded`** | Restricted Eligibility (Penalized Weight) | $2.0\text{ s}$ | Interface is experiencing elevated latency, bufferbloat, or moderate packet loss ($35 \le CHS < 55$). Kept in pool with throttled concurrency; no latency-sensitive flows assigned; eligible for work-stealing by `Active` peers. Requires $CHS \ge 70$ for $10\text{ s}$ to return to `Active`. |
-| **`Excluded`** | **Strictly Excluded (0% Weight)** | $5.0\text{ s} \to 60.0\text{ s}$ (Exp Backoff) | Unhealthy interface ($CHS < 35$, captive portal, DNS failure, or dead WAN). Removed from aggregation pool; in-flight work evacuated; physical adapter remains untouched at OS level. |
+| **`Testing`** | Diagnostic Probes Only | `1.0 s` | Initial qualification phase. Executes gateway ARP/independence check, captive portal check, DNS check, and 3 baseline RTT/throughput probes. |
+| **`Active`** | Full Eligibility (100% Weight) | `15.0 s` (Passive `0.5 s`) | Healthy interface (`CHS ≥ 65`). Receives new download chunks and application connections according to Adaptive Scheduler weights. |
+| **`Degraded`** | Restricted Eligibility (Penalized Weight) | `2.0 s` | Interface is experiencing elevated latency, bufferbloat, or moderate packet loss (`35 ≤ CHS < 55`). Kept in pool with throttled concurrency; no latency-sensitive flows assigned; eligible for work-stealing by `Active` peers. Requires `CHS ≥ 70` for `10 s` to return to `Active`. |
+| **`Excluded`** | **Strictly Excluded (0% Weight)** | `5.0 s → 60.0 s` (Exp Backoff) | Unhealthy interface (`CHS < 35`, captive portal, DNS failure, or dead WAN). Removed from aggregation pool; in-flight work evacuated; physical adapter remains untouched at OS level. |
 | **`Offline`** | None | Passive OS Event Wait | Physical carrier lost (`IFF_RUNNING == false`, Wi-Fi disconnected, USB unplugged). Zero active probing until OS signals link restoration. |
-| **`Recovering`** | Probationary Canary Only | $2.0\text{ s}$ | Previously `Excluded` interface that passed a background probe. Must sustain $N=5$ consecutive healthy probes over $\ge 15\text{ seconds}$ with $CHS \ge 70$ before re-entering `Active`. |
+| **`Recovering`** | Probationary Canary Only | `2.0 s` | Previously `Excluded` interface that passed a background probe. Must sustain `N = 5` consecutive healthy probes over `≥ 15 seconds` with `CHS ≥ 70` before re-entering `Active`. |
 
 ---
 
@@ -1885,14 +1900,14 @@ stateDiagram-v2
 > [!CAUTION]
 > **Adapter Safety Guarantee:** WiFi GigaChad 420 operates strictly in user-space/routing-space exclusion by default. It **NEVER** disables the hardware network adapter in Device Manager, `nmcli`, or `ifconfig` unless the user explicitly enables *"Allow Hardware Adapter Reset on Fatal Hang"* in Advanced Settings and grants the requisite OS privileges.
 
-When an interface transitions from `Active` or `Degraded` $\rightarrow$ `Excluded` (or `Offline`):
-1. **Atomic Pool Removal:** The interface's scheduling weight $W_i$ is immediately zeroed in the `AdaptiveScheduler` atomic registry. Zero new HTTP chunks, proxy streams, or tunnel packets are dispatched to it.
+When an interface transitions from `Active` or `Degraded` → `Excluded` (or `Offline`):
+1. **Atomic Pool Removal:** The interface's scheduling weight `W_i` is immediately zeroed in the `AdaptiveScheduler` atomic registry. Zero new HTTP chunks, proxy streams, or tunnel packets are dispatched to it.
 2. **Zero-Loss Chunk Preservation (Flush & Rewind):**
    - For every in-flight segmented download worker bound to the excluded interface, the worker aborts its stalled socket read loop immediately.
-   - Because workers write sequentially from `chunk.start_byte` into the pre-allocated sparse file, any bytes already flushed to disk in the interval $[S_k, \text{write\_offset})$ are **preserved**!
-   - If the already-written prefix $\text{write\_offset} - S_k \ge 256\text{ KiB}$, the scheduler splits the chunk in SQLite:
-     - **Sub-Chunk $k_A$ ($[S_k, \text{write\_offset} - 1]$):** Marked immediately as `COMPLETED` (preserving $100\%$ of downloaded progress).
-     - **Sub-Chunk $k_B$ ($[\text{write\_offset}, E_k]$):** Pushed to the head of the global priority queue as `PENDING` with `HighPriority` for immediate claiming by healthy `Active` interfaces.
+   - Because workers write sequentially from `chunk.start_byte` into the pre-allocated sparse file, any bytes already flushed to disk in the interval `[S_k, write_offset)` are **preserved**!
+   - If the already-written prefix `write_offset - S_k ≥ 256 KiB`, the scheduler splits the chunk in SQLite:
+     - **Sub-Chunk `k_A` (`[S_k, write_offset - 1]`):** Marked immediately as `COMPLETED` (preserving `100%` of downloaded progress).
+     - **Sub-Chunk `k_B` (`[write_offset, E_k]`):** Pushed to the head of the global priority queue as `PENDING` with `HighPriority` for immediate claiming by healthy `Active` interfaces.
 3. **Graceful Connection Evacuation:**
    - Idempotent HTTP GET/HEAD requests in the local proxy that have not yet received response body bytes are transparently retried on the highest-scoring `Active` interface.
    - Active multipath tunnel subflows (Tier D) mark the subflow dead and retransmit unacknowledged frames over surviving subflows without breaking the inner application TCP session.
@@ -2049,7 +2064,7 @@ flowchart TB
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **A. Independent Request Distribution (Flow Load Balancing)** | Binds each newly initiated outbound TCP/TLS connection or HTTP request to a different healthy interface (`Socket 1 -> NIC 1`, `Socket 2 -> NIC 2`) using weighted flow scheduling. | Web browsing (loading 50+ page assets concurrently), browser tabs, microservice/API requests, package managers (`apt`/`npm`), BitTorrent peers, HLS/DASH video chunks. | **No** (Single TCP flow is bounded by the speed of the 1 interface it is bound to; *aggregate* multi-connection throughput scales across all interfaces). | **No (100% Client-Side)** | **Session Affinity Hazard:** Websites that bind authentication cookies or TLS sessions to a single client Public IP (e.g., strict banking portals) will break if consecutive requests from the same domain jump between ISP IPs. Solved via **Destination/Domain IP Pinning (Sticky Sessions)** with automatic failover if the pinned interface becomes `Excluded`. |
 | **B. Segmented Downloading of Individual Files** | Decomposes a single logical HTTP/HTTPS resource into concurrent byte-range requests (`Range: bytes=X-Y`) dispatched over multiple bound interfaces simultaneously. | Browser file downloads, OS ISOs, software updates, game patches, and VOD segments supporting `206 Partial Content`. | **Yes** (A single file transfer saturates the combined bandwidth of all active interfaces). | **No (100% Client-Side)** | Requires origin support for `Accept-Ranges: bytes` and known `Content-Length`. For HTTPS traffic intercepted via local proxy, requires either Browser Extension URL handoff (no TLS MITM needed) or user-trusted local Root CA if splitting inside an explicit TLS proxy. |
-| **C. Transparent Aggregation of a Single Network Flow** | Encapsulates packets of a single TCP/UDP flow into a multipath tunnel (e.g., MPTCP RFC 8684, MP-QUIC, or custom multi-socket UDP/WireGuard bonding) terminated at a **Remote Aggregation Server (VPS)** with a single static Public IP. | Arbitrary single-stream TCP downloads without Range support, live RTMP/WebRTC streams, SSH/VPN sessions, online games, arbitrary desktop apps. | **Yes** (True packet-level/subflow-level bonding of a single TCP connection). | **Yes (Mandatory Remote Bonding Proxy / VPS)** | **Fundamental Internet Routing Law:** A standard internet server identifies a TCP connection by `(SrcIP, SrcPort, DstIP, DstPort)`. Packets from two different ISP Public IPs cannot belong to the same vanilla TCP stream without the origin server sending `TCP RST`. Furthermore, packet reordering across asymmetric latency links (e.g., $15\text{ ms}$ Fiber + $70\text{ ms}$ LTE) causes head-of-line blocking unless the remote aggregator buffers and resequences packets before forwarding. |
+| **C. Transparent Aggregation of a Single Network Flow** | Encapsulates packets of a single TCP/UDP flow into a multipath tunnel (e.g., MPTCP RFC 8684, MP-QUIC, or custom multi-socket UDP/WireGuard bonding) terminated at a **Remote Aggregation Server (VPS)** with a single static Public IP. | Arbitrary single-stream TCP downloads without Range support, live RTMP/WebRTC streams, SSH/VPN sessions, online games, arbitrary desktop apps. | **Yes** (True packet-level/subflow-level bonding of a single TCP connection). | **Yes (Mandatory Remote Bonding Proxy / VPS)** | **Fundamental Internet Routing Law:** A standard internet server identifies a TCP connection by `(SrcIP, SrcPort, DstIP, DstPort)`. Packets from two different ISP Public IPs cannot belong to the same vanilla TCP stream without the origin server sending `TCP RST`. Furthermore, packet reordering across asymmetric latency links (e.g., `15 ms` Fiber + `70 ms` LTE) causes head-of-line blocking unless the remote aggregator buffers and resequences packets before forwarding. |
 | **D. System-Wide VPN / Virtual Interface / Proxy Integration** | Captures traffic from unmodified OS applications via a Local HTTP/SOCKS5 Loopback Proxy, Virtual `TUN` Adapter (`VpnService` on Android, `wintun`/`tun0`), or Windows Filtering Platform (WFP) socket redirection, feeding flows into Paradigms A, B, or C. | All system-wide applications (browsers, Electron apps, CLI tools, streaming apps, OS background services). | Depends on downstream backend (A, B, or C). | No for A & B; Yes for C. | Virtual TUN interfaces receive raw Layer 3 IP packets from the OS stack. To route connections out of different physical interfaces without remote server C, the engine must operate a **User-Space TCP/IP Stack (Transparent Socket Terminator, e.g., `smoltcp`)** that terminates the local app's TCP handshake in memory and opens a new outbound socket bound to the chosen physical NIC. |
 
 ---
@@ -2069,11 +2084,11 @@ flowchart TB
    - Modern video streaming (Netflix, YouTube, Twitch VOD, HLS `.m3u8`, DASH `.mpd`) does not use a single continuous TCP stream; instead, the video player fetches sequential HTTP chunks (typically 2–10 MB segments or HTTP `Range` slices).
    - WiFi GigaChad 420 recognizes media segment patterns (`.ts`, `.m4s`, `googlevideo.com/videoplayback?range=...`) via SNI/Proxy heuristics:
      - **Parallel Segment Dispatch (Paradigm A):** Consecutive video segments or audio/video tracks are dispatched concurrently across multiple healthy interfaces.
-     - **Large Segment Splitting (Paradigm B):** If a 4K video segment is $> 4\text{ MiB}$ and uses byte ranges, the local proxy transparently splits the request into sub-ranges across fast interfaces and streams the reassembled buffer back to the local media player with zero rebuffering.
+     - **Large Segment Splitting (Paradigm B):** If a 4K video segment is `> 4 MiB` and uses byte ranges, the local proxy transparently splits the request into sub-ranges across fast interfaces and streams the reassembled buffer back to the local media player with zero rebuffering.
 
 4. **Multi-Interface Parallel DNS Resolver (`giga_dns`):**
    - System DNS often stalls the entire browser when the primary adapter degrades.
-   - WiFi GigaChad 420 embeds a local high-speed DNS resolver (`127.0.0.1:5353` / Virtual TUN DNS) that dispatches **parallel hedged DNS queries** (UDP/53 and encrypted DoH/DoT) across the top 2 lowest-latency `Active` interfaces simultaneously, returning the fastest valid response in $< 5\text{ ms}$ and caching TTLs in memory.
+   - WiFi GigaChad 420 embeds a local high-speed DNS resolver (`127.0.0.1:5353` / Virtual TUN DNS) that dispatches **parallel hedged DNS queries** (UDP/53 and encrypted DoH/DoT) across the top 2 lowest-latency `Active` interfaces simultaneously, returning the fastest valid response in `< 5 ms` and caching TTLs in memory.
    - Crucially, for CDN geo-steering (e.g., Akamai, Cloudflare), the resolver can query DNS *per interface* so sockets bound to ISP A connect to ISP A's local CDN edge node rather than crossing ISPs.
 
 5. **Connection Multiplexing (HTTP/2 & HTTP/3 QUIC):**
@@ -2083,44 +2098,64 @@ flowchart TB
 
 ### 21.6 Adaptive Network Scheduling Algorithm
 
-Rather than naive round-robin or equal splitting (which bottlenecks the entire system on the slowest link), the **Adaptive Network Scheduler** computes a real-time **Multi-Objective Utility Weight** $W_{i, c}$ for each interface $i$ and traffic class $c \in \{\text{Interactive}, \text{Streaming}, \text{BulkDownload}\}$.
+Rather than naive round-robin or equal splitting (which bottlenecks the entire system on the slowest link), the **Adaptive Network Scheduler** computes a real-time **Multi-Objective Utility Weight** `W_{i, c}` for each interface `i` and traffic class `c ∈ {Interactive, Streaming, BulkDownload}`.
 
 #### 21.6.1 Traffic Classification & Multi-Dimensional Cost Function
 
 Each outbound flow or download chunk is classified into one of three QoS classes:
-1. **`Class::Interactive` (Web Browsing, DNS, API Requests, TLS Handshakes):** Prioritizes ultra-low latency ($RTT_i$), zero packet loss ($L_i$), and high stability ($S_i$).
-2. **`Class::Streaming` (Video Streaming, Audio, Live Feeds):** Prioritizes sustained goodput above bitrate target, low jitter, and low bufferbloat ($\Delta RTT_i$).
-3. **`Class::BulkDownload` (Large File Transfers, Segmented Chunks, Updates):** Prioritizes raw available bandwidth ($B_{\text{avail}, i}$), while strictly respecting metered connection rules and data caps.
+1. **`Class::Interactive` (Web Browsing, DNS, API Requests, TLS Handshakes):** Prioritizes ultra-low latency (`RTT_i`), zero packet loss (`L_i`), and high stability (`S_i`).
+2. **`Class::Streaming` (Video Streaming, Audio, Live Feeds):** Prioritizes sustained goodput above bitrate target, low jitter, and low bufferbloat (`ΔRTT_i`).
+3. **`Class::BulkDownload` (Large File Transfers, Segmented Chunks, Updates):** Prioritizes raw available bandwidth (`B_{avail, i}`), while strictly respecting metered connection rules and data caps.
 
 #### 21.6.2 Mathematical Scheduling Weight Formulation
 
-For an eligible interface $i \in \{\text{Active}, \text{Degraded}\}$, its scheduling weight $W_{i, c}$ for traffic class $c$ is computed every $500\text{ ms}$:
+For an eligible interface `i ∈ {Active, Degraded}`, its scheduling weight `W_{i, c}` for traffic class `c` is computed every `500 ms`:
 
-$$W_{i, c} = \Psi_{\text{state}}(i) \cdot \Psi_{\text{cap}}(i, c) \cdot \Psi_{\text{prio}}(i) \cdot U_{c}(i)$$
+```text
+W_{i, c} = Ψ_state(i) * Ψ_cap(i, c) * Ψ_prio(i) * U_c(i)
+```
 
-1. **State Multiplier $\Psi_{\text{state}}(i)$:**
-   $$\Psi_{\text{state}}(i) = \begin{cases} 1.0 & \text{if State} = \text{Active} \\ 0.25 \cdot \left(\frac{CHS_i}{100}\right) & \text{if State} = \text{Degraded} \\ \min\left(1.0, 0.25 + 0.75 \cdot \frac{t_{\text{since\_recovery}}}{10\text{s}}\right) & \text{if State} = \text{Active (Warm-Up Ramp)} \\ 0.0 & \text{if State} \in \{\text{Excluded}, \text{Offline}, \text{Testing}, \text{Recovering}\} \end{cases}$$
+1. **State Multiplier `Ψ_state(i)`:**
+   ```text
+   Ψ_state(i) =
+     1.0                                             if State == Active
+     0.25 * (CHS_i / 100.0)                          if State == Degraded
+     min(1.0, 0.25 + 0.75 * (t_since_recovery / 10s)) if State == Active (Warm-Up Ramp)
+     0.0                                             if State in {Excluded, Offline, Testing, Recovering}
+   ```
 
-2. **Metered & Data Cap Guard $\Psi_{\text{cap}}(i, c)$:**
-   Let $D_{\text{used}, i}$ be the bytes consumed on interface $i$ against user cap $D_{\max, i}$:
-   $$\Psi_{\text{cap}}(i, c) = \begin{cases} 0.0 & \text{if } D_{\text{used}, i} \ge 0.98 \cdot D_{\max, i} \text{ (Hard Cap Reached)} \\ 0.05 & \text{if } \text{is\_metered}(i) \land c = \text{BulkDownload} \land \text{Unmetered Interface Available} \\ \left(1 - \frac{D_{\text{used}, i}}{D_{\max, i}}\right)^2 & \text{if Soft Cap Budget Active} \\ 1.0 & \text{otherwise} \end{cases}$$
+2. **Metered & Data Cap Guard `Ψ_cap(i, c)`:**
+   Let `D_{used, i}` be the bytes consumed on interface `i` against user cap `D_{max, i}`:
+   ```text
+   Ψ_cap(i, c) =
+     0.0                                             if D_{used, i} >= 0.98 * D_{max, i} (Hard Cap Reached)
+     0.05                                            if is_metered(i) and c == BulkDownload and Unmetered Available
+     (1.0 - D_{used, i} / D_{max, i})^2              if Soft Cap Budget Active
+     1.0                                             otherwise
+   ```
 
-3. **User Priority Weight $\Psi_{\text{prio}}(i)$:**
-   Normalized from user slider $P_i \in [1, 5] \implies \Psi_{\text{prio}}(i) = \frac{P_i}{3.0}$.
+3. **User Priority Weight `Ψ_prio(i)`:**
+   Normalized from user slider `P_i ∈ [1, 5]` → `Ψ_prio(i) = P_i / 3.0`.
 
-4. **Class-Specific Network Utility $U_c(i)$:**
+4. **Class-Specific Network Utility `U_c(i)`:**
    - **For `BulkDownload`:** Proportional to Headroom Bandwidth penalized by Packet Loss and Bufferbloat:
-     $$U_{\text{bulk}}(i) = \frac{B_{\text{EMA}, i} \cdot (1 - L_i)^3}{1 + \max(0, \Delta RTT_i / 50\text{ms})}$$
+     ```text
+     U_bulk(i)        = (B_{EMA, i} * (1 - L_i)^3) / (1 + max(0, ΔRTT_i / 50ms))
+     ```
    - **For `Interactive` (Web/API):** Inversely proportional to RTT and Loss:
-     $$U_{\text{interactive}}(i) = \frac{1000}{\max(5\text{ms}, RTT_i + 2 \cdot J_i)} \cdot (1 - L_i)^6 \cdot \Phi_{\text{stab}}(i)$$
+     ```text
+     U_interactive(i) = (1000 / max(5ms, RTT_i + 2 * J_i)) * (1 - L_i)^6 * Φ_stab(i)
+     ```
    - **For `Streaming`:** Balanced Goodput-to-Jitter ratio:
-     $$U_{\text{stream}}(i) = \frac{\sqrt{B_{\text{EMA}, i}} \cdot (1 - L_i)^4}{\max(10\text{ms}, RTT_i + \Delta RTT_i)}$$
+     ```text
+     U_stream(i)      = (sqrt(B_{EMA, i}) * (1 - L_i)^4) / max(10ms, RTT_i + ΔRTT_i)
+     ```
 
 #### 21.6.3 Flow & Chunk Allocation Mechanics
-* **For Segmented Downloads (Paradigm B):** Normalized allocation share for interface $i$ is $R_i = \frac{W_{i, \text{bulk}}}{\sum_k W_{k, \text{bulk}}}$. Both the concurrent worker count $M_i \in [1, M_{\max}]$ and dynamic chunk size $C_i = \text{clamp}(B_{\text{EMA}, i} \cdot \tau \cdot \Psi_{\text{state}}(i), 1\text{ MiB}, 64\text{ MiB})$ scale with $R_i$.
+* **For Segmented Downloads (Paradigm B):** Normalized allocation share for interface `i` is `R_i = W_{i, bulk} / Σ_k W_{k, bulk}`. Both the concurrent worker count `M_i ∈ [1, M_max]` and dynamic chunk size `C_i = clamp(B_{EMA, i} * τ * Ψ_state(i), 1 MiB, 64 MiB)` scale with `R_i`.
 * **For Independent Application Flows (Paradigm A):** Uses **Sticky Deficit Weighted Round-Robin (SD-WRR)** with a consistent hash ring on `(Destination_ETLD+1, Protocol)`:
-  - New domains are assigned to interface $i$ with probability $P(i) = \frac{W_{i, \text{interactive}}}{\sum_k W_{k, \text{interactive}}}$.
-  - Subsequent connections to the same domain within a $120\text{ s}$ TTL reuse interface $i$ (preventing IP-session invalidation) **unless** interface $i$ transitions to `Degraded` ($CHS < 45$) or `Excluded`, in which case the domain pin is immediately migrated to the highest-weight `Active` interface.
+  - New domains are assigned to interface `i` with probability `P(i) = W_{i, interactive} / Σ_k W_{k, interactive}`.
+  - Subsequent connections to the same domain within a `120 s` TTL reuse interface `i` (preventing IP-session invalidation) **unless** interface `i` transitions to `Degraded` (`CHS < 45`) or `Excluded`, in which case the domain pin is immediately migrated to the highest-weight `Active` interface.
 
 ---
 
@@ -2175,7 +2210,7 @@ sequenceDiagram
 #### 21.8.1 Windows Implementation (`giga_net::windows`)
 1. **INR Telemetry & Wi-Fi Probing:**
    - **Link & IP Events:** `NotifyIpInterfaceChange` and `NotifyRouteChange2` (`iphlpapi.dll`) for sub-millisecond link state notifications; `GetAdaptersAddresses` for gateway/DNS enumeration.
-   - **Wi-Fi Signal & PHY Metrics:** Native Wifi API (`wlanapi.dll` $\rightarrow$ `WlanQueryInterface` with `wlan_intf_opcode_current_connection` and `wlan_intf_opcode_rssi`) to extract real-time RSSI (dBm), link quality ($0-100$), and 802.11 PHY rate.
+   - **Wi-Fi Signal & PHY Metrics:** Native Wifi API (`wlanapi.dll` → `WlanQueryInterface` with `wlan_intf_opcode_current_connection` and `wlan_intf_opcode_rssi`) to extract real-time RSSI (dBm), link quality (`0–100`), and 802.11 PHY rate.
    - **Metered Status & TCP Stats:** Windows Runtime `NetworkInformation.GetInternetConnectionProfile().GetConnectionCost()` for metered detection; `GetPerTcpConnectionEStats` for passive kernel RTT and retransmission telemetry.
 2. **System-Wide Traffic Interception & Routing:**
    - **Tier 1 (Unprivileged Default):** Configures Windows User-Level Proxy settings (`HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings` or PAC file auto-configuration) pointing to the local `giga_core` HTTP/SOCKS5 engine (`127.0.0.1:8080`), paired with the Browser Native Messaging Extension.
@@ -2260,11 +2295,11 @@ CREATE INDEX IF NOT EXISTS idx_health_events_iface_time
 
 | Failure Mode | Detection Signal | Automated Recovery & Fallback Behavior |
 | :--- | :--- | :--- |
-| **All Interfaces Become `Excluded` Simultaneously** | $\sum W_i = 0$ (Total WAN blackout). | Pause active chunk workers cleanly without incrementing chunk retry counters (preserving state). Route system proxy requests to the OS default interface in pass-through fail-open mode so local LAN access (`192.168.x.x`) remains functional. Immediately resume upon first interface entering `Active` or `Degraded`. |
-| **"Zombie Wi-Fi" (Strong RSSI, Dropped ISP Fibre)** | RSSI $> -55\text{ dBm}$, but 3 consecutive bound probes time out ($L = 100\%$). | Transition Wi-Fi to `Excluded` within $3.0\text{ seconds}$. Evacuate all chunks and system flows to cellular/secondary adapter. Continue background probes on Wi-Fi with exponential backoff. |
-| **Rapid Link Flapping (Unstable Cellular Tower)** | Interface transitions `Active` $\leftrightarrow$ `Excluded` $\ge 3$ times within 3 minutes. | Increment `flap_count`. Multiply required `Recovering` dwell time by $2^{\text{flap\_count}}$ (up to 5 minutes) and reduce stability score $\Phi_{\text{stab}}$ so the interface must prove sustained stability before re-admission. |
+| **All Interfaces Become `Excluded` Simultaneously** | `Σ W_i = 0` (Total WAN blackout). | Pause active chunk workers cleanly without incrementing chunk retry counters (preserving state). Route system proxy requests to the OS default interface in pass-through fail-open mode so local LAN access (`192.168.x.x`) remains functional. Immediately resume upon first interface entering `Active` or `Degraded`. |
+| **"Zombie Wi-Fi" (Strong RSSI, Dropped ISP Fibre)** | RSSI `> -55 dBm`, but 3 consecutive bound probes time out (`L = 100%`). | Transition Wi-Fi to `Excluded` within `3.0 seconds`. Evacuate all chunks and system flows to cellular/secondary adapter. Continue background probes on Wi-Fi with exponential backoff. |
+| **Rapid Link Flapping (Unstable Cellular Tower)** | Interface transitions `Active` ↔ `Excluded` `≥ 3` times within 3 minutes. | Increment `flap_count`. Multiply required `Recovering` dwell time by `2^flap_count` (up to 5 minutes) and reduce stability score `Φ_stab` so the interface must prove sustained stability before re-admission. |
 | **Mid-Browse IP Pinning Failure (401/403 Session Drop)** | Pinned interface fails while user is browsing an authenticated site. | Migrate domain pin to highest-scoring `Active` interface. Emit subtle UI toast notification if an active non-range upload stream was interrupted by the ISP failover. |
-| **Data Cap Exhaustion Mid-Download** | `consumed_bytes >= 0.98 * monthly_cap_bytes` on cellular interface. | Immediately transition interface scheduling weight for `BulkDownload` to $0.0$. Drain and split active chunks onto remaining unmetered interfaces. If no unmetered interfaces exist, pause bulk downloads and alert the user. |
+| **Data Cap Exhaustion Mid-Download** | `consumed_bytes >= 0.98 * monthly_cap_bytes` on cellular interface. | Immediately transition interface scheduling weight for `BulkDownload` to `0.0`. Drain and split active chunks onto remaining unmetered interfaces. If no unmetered interfaces exist, pause bulk downloads and alert the user. |
 
 ---
 
@@ -2273,27 +2308,27 @@ CREATE INDEX IF NOT EXISTS idx_health_events_iface_time
 #### 21.11.1 Automated INR & System-Wide Optimization Test Suite
 1. **Zombie Wi-Fi Fault Injection (`netem` / `toxiproxy`):**
    - Configure `wlan0` with simulated `-45 dBm` RSSI and `100%` upstream packet drop at the gateway, while `usb0` has `-82 dBm` RSSI and `40 Mbps` throughput.
-   - **Assertion:** INR transitions `wlan0` to `Excluded` in $\le 3.5\text{ seconds}$, preserves 100% of already-written sparse file bytes, reassigns pending chunks to `usb0`, and completes transfer with zero corruption.
+   - **Assertion:** INR transitions `wlan0` to `Excluded` in `≤ 3.5 seconds`, preserves 100% of already-written sparse file bytes, reassigns pending chunks to `usb0`, and completes transfer with zero corruption.
 2. **Hysteresis Anti-Flap Verification:**
-   - Inject sinusoidal packet loss oscillating between $4\%$ and $6\%$ every $2\text{ seconds}$ on `eth0`.
-   - **Assertion:** Asymmetric hysteresis thresholds ($55$ vs $70$) and dwell timers prevent state transitions from exceeding 1 transition per 15-second window.
+   - Inject sinusoidal packet loss oscillating between `4%` and `6%` every `2 seconds` on `eth0`.
+   - **Assertion:** Asymmetric hysteresis thresholds (`55` vs `70`) and dwell timers prevent state transitions from exceeding 1 transition per 15-second window.
 3. **Captive Portal Quarantine Test:**
    - Mock `wlan1` gateway returning `HTTP 302 Found -> http://10.0.0.1/login` on probe requests.
-   - **Assertion:** `wlan1` is immediately placed in `Excluded (CaptivePortal)`, zero user HTTPS or download traffic is dispatched to `wlan1`, and recovery occurs automatically within $15\text{ s}$ after the mock portal returns `HTTP 204`.
+   - **Assertion:** `wlan1` is immediately placed in `Excluded (CaptivePortal)`, zero user HTTPS or download traffic is dispatched to `wlan1`, and recovery occurs automatically within `15 s` after the mock portal returns `HTTP 204`.
 4. **System-Wide Multi-Flow Browser & Streaming Benchmark:**
    - Simulate a web page load (60 concurrent HTTPS asset requests across 8 domains) + a 4K HLS video stream over dual links (`100 Mbps` + `50 Mbps`).
-   - **Assertion:** Domain affinity keeps same-domain connections sticky to a single public IP while distributing distinct domains and HLS segments across both links proportionally ($2:1$ ratio).
+   - **Assertion:** Domain affinity keeps same-domain connections sticky to a single public IP while distributing distinct domains and HLS segments across both links proportionally (`2:1` ratio).
 
 #### 21.11.2 Quantitative Performance Targets (INR & System-Wide Engine)
 
 | Benchmark Metric | Target Specification |
 | :--- | :--- |
-| **Unhealthy Interface Detection Latency (Dead WAN)** | $\le 3.0\text{ seconds}$ from complete upstream packet drop to `Excluded` state |
-| **In-Flight Work Reassignment Latency** | $\le 150\text{ milliseconds}$ from `Excluded` transition to chunk re-queueing on healthy peers |
-| **Preserved Byte Efficiency on Failover** | $100\%$ of flushed 256 KiB blocks preserved; zero full-file restarts |
-| **Idle Probe Bandwidth Overhead** | $\le 1.5\text{ KB/s}$ per interface during idle monitoring; $< 0.1\text{ KB/s}$ during backoff |
-| **INR Background CPU Overhead** | $\le 0.5\%$ CPU utilization across 4 monitored interfaces |
-| **Local System Proxy / TUN Forwarding Throughput** | $\ge 2.5\text{ Gbps}$ loopback throughput with $< 0.8\text{ ms}$ added local forwarding latency |
+| **Unhealthy Interface Detection Latency (Dead WAN)** | `≤ 3.0 seconds` from complete upstream packet drop to `Excluded` state |
+| **In-Flight Work Reassignment Latency** | `≤ 150 milliseconds` from `Excluded` transition to chunk re-queueing on healthy peers |
+| **Preserved Byte Efficiency on Failover** | `100%` of flushed 256 KiB blocks preserved; zero full-file restarts |
+| **Idle Probe Bandwidth Overhead** | `≤ 1.5 KB/s` per interface during idle monitoring; `< 0.1 KB/s` during backoff |
+| **INR Background CPU Overhead** | `≤ 0.5%` CPU utilization across 4 monitored interfaces |
+| **Local System Proxy / TUN Forwarding Throughput** | `≥ 2.5 Gbps` loopback throughput with `< 0.8 ms` added local forwarding latency |
 
 ---
 
@@ -2311,7 +2346,7 @@ To maintain engineering discipline and ship reliable software iteratively, the I
 
 ---
 
-### 21.13 Cross-Device Phone $\leftrightarrow$ Laptop Wi-Fi Mesh Architecture (`giga_mesh`)
+### 21.13 Cross-Device Phone ↔ Laptop Wi-Fi Mesh Architecture (`giga_mesh`)
 
 A frequent real-world bottleneck occurs when a user has a **Laptop** and a **Mobile Phone** connected to the **same Wi-Fi router** (e.g., campus Wi-Fi or home broadband):
 * The Laptop only has a single physical Wi-Fi card.
@@ -2363,9 +2398,9 @@ flowchart LR
    - **Primary (mDNS):** Both devices broadcast `_gigachad-mesh._udp.local.` via `mdns-sd` on the shared Wi-Fi subnet.
    - **Fallback (QR Code + Wi-Fi Direct):** On university/enterprise networks with **Wireless Client Isolation (AP Isolation)** where devices on the same SSID cannot ping each other directly, scanning a QR code displayed on the Desktop UI triggers an automatic **Wi-Fi Direct (`WifiP2pManager` / Windows Wi-Fi Direct)** peer-to-peer link or `iroh` hole-punched relay while keeping both devices associated with the main router.
 2. **Cryptographic Mutual Authentication (Zero-Trust LAN):**
-   - Pairing exchanges Ed25519 public keys (`NodeId`) via QR code or 6-digit SPAKE2+ PIN. All local Wi-Fi mesh traffic is encrypted with **TLS 1.3 (mTLS)** over QUIC so other users on a public/campus Wi-Fi cannot eavesdrop on or inject traffic into the Phone $\leftrightarrow$ Laptop bridge.
+   - Pairing exchanges Ed25519 public keys (`NodeId`) via QR code or 6-digit SPAKE2+ PIN. All local Wi-Fi mesh traffic is encrypted with **TLS 1.3 (mTLS)** over QUIC so other users on a public/campus Wi-Fi cannot eavesdrop on or inject traffic into the Phone ↔ Laptop bridge.
 3. **Unified `NetworkInterface` Trait Integration:**
-   - The Phone continuously runs `giga_inr` on its 5G Cellular interface and streams its live `TelemetrySnapshot` (5G CHS score, RTT, goodput EMA, and cellular data cap remaining) to the Laptop over a lightweight QUIC control stream every $500\text{ ms}$.
+   - The Phone continuously runs `giga_inr` on its 5G Cellular interface and streams its live `TelemetrySnapshot` (5G CHS score, RTT, goodput EMA, and cellular data cap remaining) to the Laptop over a lightweight QUIC control stream every `500 ms`.
    - To the Laptop's `AdaptiveScheduler`, `RemotePeerInterface` is just another `Active` interface in the pool!
 
 ---
