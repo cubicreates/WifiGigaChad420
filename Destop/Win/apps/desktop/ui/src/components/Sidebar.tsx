@@ -14,6 +14,7 @@ export function renderSidebar(props: SidebarProps): string {
     { id: 'dashboard', step: '01', title: 'Wi-Fi Dashboard', subtitle: 'Speeds, Modes & Benchmark' },
     { id: 'processes', step: '02', title: 'Ongoing Processes', subtitle: 'Active Streams & Downloads' },
     { id: 'system', step: '03', title: 'System & Mesh Info', subtitle: 'OS Config, DNS & Phone Mesh' },
+    { id: 'logs', step: '04', title: 'Logs & Diagnostics', subtitle: 'Multi-WiFi Inspector & Events' },
   ];
 
   const navHtml = items

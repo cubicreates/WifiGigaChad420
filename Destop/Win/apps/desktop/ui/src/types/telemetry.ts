@@ -1,6 +1,32 @@
-export type ActiveScreenId = 'dashboard' | 'processes' | 'system';
+export type ActiveScreenId = 'dashboard' | 'processes' | 'system' | 'logs';
 
 export type RoutingMode = 'max_speed' | 'low_ping' | 'data_saver';
+
+export interface SystemLogEntry {
+  timestamp: string;
+  level: 'INFO' | 'OK' | 'WARN' | 'ERROR';
+  category: string;
+  message: string;
+}
+
+export interface WlanAdapterDiag {
+  name: string;
+  description: string;
+  state: string;
+  ssid: string;
+  band: string;
+}
+
+export interface WlanHardwareDiagnostics {
+  physical_wifi_count: number;
+  max_secondary_stas: number;
+  can_simultaneous_wifi_natively: boolean;
+  wlan_adapters: WlanAdapterDiag[];
+  saved_profiles: string[];
+  diagnosis_code: string;
+  diagnosis_title: string;
+  diagnosis_explanation: string;
+}
 
 export type InterfaceHealthState =
   | 'Standby'
@@ -110,6 +136,8 @@ export interface SystemStatusPayload {
   routing_mode: RoutingMode;
   speed_test: CombinedSpeedTestReport | null;
   update_info: UpdateReleaseInfo;
+  logs?: SystemLogEntry[];
+  wlan_diag?: WlanHardwareDiagnostics;
   os_status: {
     is_elevated_admin: boolean;
     system_proxy_enabled: boolean;

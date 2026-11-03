@@ -3,6 +3,7 @@ import {
   CombinedSpeedTestReport,
   HealthScoreSnapshot,
   RoutingMode,
+  WlanHardwareDiagnostics,
 } from '../types/telemetry';
 
 export interface WifiDashboardScreenProps {
@@ -11,6 +12,7 @@ export interface WifiDashboardScreenProps {
   totalTransferredBytes: number;
   routingMode: RoutingMode;
   speedTest: CombinedSpeedTestReport | null;
+  wlanDiag?: WlanHardwareDiagnostics;
 }
 
 export function renderWifiDashboardScreen(props: WifiDashboardScreenProps): string {
@@ -164,7 +166,19 @@ export function renderWifiDashboardScreen(props: WifiDashboardScreenProps): stri
 
       <div class="card">
         <div class="card-header">
-          <div class="card-title">Connected Wi-Fi &amp; Network Adapters (Individual Speeds &amp; Status)</div>
+          <div>
+            <div class="card-title">Connected Wi-Fi &amp; Network Adapters (Individual Speeds &amp; Status)</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">
+              ${
+                props.wlanDiag && props.wlanDiag.physical_wifi_count <= 1 && props.wlanDiag.max_secondary_stas === 0
+                  ? `<span style="color:#fbbf24;font-weight:600;">&#9888; Single Wi-Fi Radio Detected (${props.wlanDiag.wlan_adapters[0]?.description || 'MediaTek MT7921'}, Max Secondary STAs = 0):</span> Connecting a 2nd Wi-Fi on the same radio swaps networks. Plug in a <strong>USB Wi-Fi Dongle (Wi-Fi 2)</strong> or connect your <strong>Phone via USB Tethering</strong> to attach a 2nd Wi-Fi simultaneously!`
+                  : `<span style="color:var(--green);">Anti-Swap Active (fMinimizeConnections = 0)</span>`
+              }
+            </div>
+          </div>
+          <button class="btn btn-secondary" onclick="Store.setState({activeScreen:'logs'})">
+            Open Multi-WiFi Connector &amp; Logs &rarr;
+          </button>
         </div>
         <div class="wifi-grid">
           ${cardsHtml}

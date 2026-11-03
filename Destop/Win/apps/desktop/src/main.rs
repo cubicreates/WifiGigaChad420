@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use anyhow::Result;
 use clap::Parser;
 use giga_inr::InrEngine;
@@ -9,13 +11,67 @@ use giga_pal::{
 use giga_transport::{MultiPathDownloader, ProxyGatewayConfig, SystemProxyGateway};
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
+
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+fn hidden_cmd(program: &str) -> Command {
+    let mut c = Command::new(program);
+    #[cfg(windows)]
+    {
+        c.creation_flags(CREATE_NO_WINDOW);
+    }
+    c
+}
+
+fn now_hms() -> String {
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let s = secs % 60;
+    let m = (secs / 60) % 60;
+    let h = (secs / 3600) % 24;
+    format!("{:02}:{:02}:{:02} UTC", h, m, s)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemLogEntry {
+    pub timestamp: String,
+    pub level: String, // "INFO" | "OK" | "WARN" | "ERROR"
+    pub category: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WlanAdapterDiag {
+    pub name: String,
+    pub description: String,
+    pub state: String,
+    pub ssid: String,
+    pub band: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WlanHardwareDiagnostics {
+    pub physical_wifi_count: usize,
+    pub max_secondary_stas: u32,
+    pub can_simultaneous_wifi_natively: bool,
+    pub wlan_adapters: Vec<WlanAdapterDiag>,
+    pub saved_profiles: Vec<String>,
+    pub diagnosis_code: String,
+    pub diagnosis_title: String,
+    pub diagnosis_explanation: String,
+}
 
 const EMBEDDED_UI_HTML: &str = include_str!(concat!(env!("OUT_DIR"), "/ui_bundle.html"));
 
@@ -107,13 +163,42 @@ struct AppContext {
     routing_mode: Arc<RwLock<String>>,
     speed_test: Arc<RwLock<Option<CombinedSpeedTestReport>>>,
     update_info: Arc<RwLock<UpdateReleaseInfo>>,
+    logs: Arc<RwLock<Vec<SystemLogEntry>>>,
+    wlan_diag: Arc<RwLock<WlanHardwareDiagnostics>>,
+    first_ui_poll: Arc<AtomicBool>,
+    last_ui_poll_ms: Arc<AtomicU64>,
+}
+
+impl AppContext {
+    async fn push_log(&self, level: &str, category: &str, message: impl Into<String>) {
+        let mut guard = self.logs.write().await;
+        guard.insert(
+            0,
+            SystemLogEntry {
+                timestamp: now_hms(),
+                level: level.to_string(),
+                category: category.to_string(),
+                message: message.into(),
+            },
+        );
+        if guard.len() > 150 {
+            guard.truncate(150);
+        }
+    }
+}
+
+fn current_epoch_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 fn is_app_installed() -> bool {
     if PathBuf::from(r"C:\Users\Public\WiFiGigaChad420\installed.marker").exists() {
         return true;
     }
-    Command::new("reg")
+    hidden_cmd("reg")
         .args([
             "query",
             r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\WiFiGigaChad420",
@@ -123,15 +208,134 @@ fn is_app_installed() -> bool {
         .unwrap_or(false)
 }
 
+fn inspect_wlan_hardware() -> WlanHardwareDiagnostics {
+    let mut wlan_adapters = Vec::new();
+    if let Ok(out) = hidden_cmd("netsh").args(["wlan", "show", "interfaces"]).output() {
+        let text = String::from_utf8_lossy(&out.stdout);
+        let mut cur_name = String::new();
+        let mut cur_desc = String::new();
+        let mut cur_state = String::new();
+        let mut cur_ssid = String::new();
+        let mut cur_band = String::new();
+
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if let Some((k, v)) = trimmed.split_once(':') {
+                let key = k.trim();
+                let val = v.trim();
+                match key {
+                    "Name" => {
+                        if !cur_name.is_empty() {
+                            wlan_adapters.push(WlanAdapterDiag {
+                                name: cur_name.clone(),
+                                description: cur_desc.clone(),
+                                state: cur_state.clone(),
+                                ssid: cur_ssid.clone(),
+                                band: cur_band.clone(),
+                            });
+                            cur_desc.clear();
+                            cur_state.clear();
+                            cur_ssid.clear();
+                            cur_band.clear();
+                        }
+                        cur_name = val.to_string();
+                    }
+                    "Description" => cur_desc = val.to_string(),
+                    "State" => cur_state = val.to_string(),
+                    "SSID" => cur_ssid = val.to_string(),
+                    "Band" => cur_band = val.to_string(),
+                    _ => {}
+                }
+            }
+        }
+        if !cur_name.is_empty() {
+            wlan_adapters.push(WlanAdapterDiag {
+                name: cur_name,
+                description: cur_desc,
+                state: cur_state,
+                ssid: cur_ssid,
+                band: cur_band,
+            });
+        }
+    }
+
+    let mut max_secondary_stas = 0u32;
+    if let Ok(out) = hidden_cmd("netsh")
+        .args(["wlan", "show", "wirelesscapabilities"])
+        .output()
+    {
+        let text = String::from_utf8_lossy(&out.stdout);
+        for line in text.lines() {
+            if line.contains("Maximum Number of Secondary STAs Supported") {
+                if let Some((_, v)) = line.split_once(':') {
+                    max_secondary_stas = v.trim().parse::<u32>().unwrap_or(0);
+                }
+            }
+        }
+    }
+
+    let mut saved_profiles = Vec::new();
+    if let Ok(out) = hidden_cmd("netsh").args(["wlan", "show", "profiles"]).output() {
+        let text = String::from_utf8_lossy(&out.stdout);
+        for line in text.lines() {
+            if line.contains("All User Profile") || line.contains("Current User Profile") {
+                if let Some((_, v)) = line.split_once(':') {
+                    let prof = v.trim();
+                    if !prof.is_empty() {
+                        saved_profiles.push(prof.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    let physical_wifi_count = wlan_adapters.len();
+    let can_simultaneous_wifi_natively = physical_wifi_count >= 2 || max_secondary_stas >= 1;
+
+    let (diagnosis_code, diagnosis_title, diagnosis_explanation) = if physical_wifi_count == 1
+        && max_secondary_stas == 0
+    {
+        let card_name = wlan_adapters
+            .first()
+            .map(|a| format!("{} ({})", a.name, a.description))
+            .unwrap_or_else(|| "Primary Wi-Fi Card".to_string());
+        (
+            "SINGLE_RADIO_HARDWARE_SWAP".to_string(),
+            format!("Why 2nd Wi-Fi Swaps: {} Has Only 1 Physical Radio (Secondary STAs = 0)", card_name),
+            format!(
+                "Hardware Diagnostic: `netsh wlan show wirelesscapabilities` reports your {} has `Maximum Number of Secondary STAs Supported: 0` and only 1 physical Wi-Fi interface (`{}`). A single 802.11 radio can only tune to ONE router channel at a time, so clicking a 2nd Wi-Fi in Windows forces the chip to disconnect Wi-Fi #1 and swap to Wi-Fi #2. TO CONNECT 2 WI-FI NETWORKS SIMULTANEOUSLY: (1) Plug in a USB Wi-Fi Dongle (shows up as `Wi-Fi 2`), OR (2) Connect your Phone to the 2nd Wi-Fi network and plug your Phone into this laptop with a USB cable (enable 'USB Tethering' on phone — Android shares Wi-Fi #2 over USB as a 2nd network adapter with zero swapping!).",
+                card_name,
+                wlan_adapters.first().map(|a| a.name.as_str()).unwrap_or("Wi-Fi")
+            ),
+        )
+    } else if physical_wifi_count >= 2 {
+        (
+            "MULTI_ADAPTER_READY".to_string(),
+            format!("{} Physical Wi-Fi Adapters Detected — Anti-Swap Active!", physical_wifi_count),
+            "Multiple physical Wi-Fi adapters are present and Windows Connection Manager (fMinimizeConnections = 0) is locked so Windows will NOT disconnect Wi-Fi 1 when connecting Wi-Fi 2. Use the Per-Adapter Connector below to bind each adapter to its own SSID.".to_string(),
+        )
+    } else {
+        (
+            "DUAL_STA_READY".to_string(),
+            "Dual-STA / Multi-Connector Ready".to_string(),
+            "OS anti-swap policy (fMinimizeConnections = 0) is active.".to_string(),
+        )
+    };
+
+    WlanHardwareDiagnostics {
+        physical_wifi_count,
+        max_secondary_stas,
+        can_simultaneous_wifi_natively,
+        wlan_adapters,
+        saved_profiles,
+        diagnosis_code,
+        diagnosis_title,
+        diagnosis_explanation,
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
-
     let args = DesktopArgs::parse();
 
     // Built-in CLI execution inside the single unified executable
@@ -156,10 +360,6 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Unified single-executable mode detection:
-    // 1. `--uninstall` -> Uninstaller Popup Wizard
-    // 2. `--installer` or First Run (`!is_app_installed()`) -> Setup Installer Wizard
-    // 3. Otherwise -> Main 3-Screen Dashboard
     let initial_mode = if args.uninstall {
         "uninstaller".to_string()
     } else if args.installer || !is_app_installed() {
@@ -168,16 +368,65 @@ async fn main() -> Result<()> {
         "normal".to_string()
     };
 
-    if is_running_as_admin() && initial_mode == "normal" {
+    let mut initial_logs = Vec::new();
+    initial_logs.push(SystemLogEntry {
+        timestamp: now_hms(),
+        level: "INFO".to_string(),
+        category: "STARTUP".to_string(),
+        message: format!(
+            "WiFi GigaChad 420 started in '{}' mode (Admin Elevated: {}, Subsystem: Windows GUI / Zero-CLI Popup).",
+            initial_mode,
+            is_running_as_admin()
+        ),
+    });
+
+    if is_running_as_admin() {
         let pal = create_platform_manager();
         if let Ok(wan) = pal.enumerate_wan_candidates() {
             let rep = apply_windows_multi_connector_optimizations(&wan, false);
-            println!(
-                "[OS-OPTIMIZER] Elevated Administrator detected — applied {} Windows Multi-WiFi OS configurations.",
-                rep.steps.iter().filter(|s| s.applied).count()
+            let applied_cnt = rep.steps.iter().filter(|s| s.applied).count();
+            initial_logs.insert(
+                0,
+                SystemLogEntry {
+                    timestamp: now_hms(),
+                    level: "OK".to_string(),
+                    category: "OS-OPTIMIZER".to_string(),
+                    message: format!(
+                        "Applied {} Windows Multi-WiFi anti-swap & routing policies (fMinimizeConnections=0 across GroupPolicy, wifinetworkmanager & WcmSvc).",
+                        applied_cnt
+                    ),
+                },
             );
         }
+    } else {
+        initial_logs.insert(
+            0,
+            SystemLogEntry {
+                timestamp: now_hms(),
+                level: "WARN".to_string(),
+                category: "OS-OPTIMIZER".to_string(),
+                message: "Process is not elevated as Administrator; click 'Configure Windows for Multi-WiFi' to grant UAC access.".to_string(),
+            },
+        );
     }
+
+    let diag = inspect_wlan_hardware();
+    initial_logs.insert(
+        0,
+        SystemLogEntry {
+            timestamp: now_hms(),
+            level: if diag.physical_wifi_count == 1 && diag.max_secondary_stas == 0 {
+                "WARN".to_string()
+            } else {
+                "OK".to_string()
+            },
+            category: "WLAN-HARDWARE".to_string(),
+            message: format!(
+                "{} — {}",
+                diag.diagnosis_title, diag.diagnosis_explanation
+            ),
+        },
+    );
 
     let inr = InrEngine::new();
     let _ = inr.refresh_and_probe(Duration::from_millis(2500)).await;
@@ -211,21 +460,29 @@ async fn main() -> Result<()> {
     let bound_addr = listener.local_addr()?;
     let url = format!("http://{}", bound_addr);
 
-    println!("================================================================================");
-    println!(" WIFI GIGACHAD 420 — UNIFIED WINDOWS EXECUTABLE ({})", initial_mode.to_uppercase());
-    println!("================================================================================");
-    println!("  UI Endpoint       : {}", url);
-    println!("  Admin Elevation   : {}", is_running_as_admin());
-    println!("  SOCKS5 Proxy      : 127.0.0.1:1080 (Happy Eyeballs v3 Hedged)");
-    println!("  HTTP Proxy        : 127.0.0.1:1081 (Happy Eyeballs v3 Hedged)");
-    println!(
-        "  Wi-Fi Mesh Bridge : UDP :42069 / TCP :42070 (PIN: {})",
-        mesh.pairing_pin().await
-    );
-    println!("================================================================================");
-
     if !args.headless {
         launch_native_app_window(&url);
+    }
+
+    let first_ui_poll = Arc::new(AtomicBool::new(false));
+    let last_ui_poll_ms = Arc::new(AtomicU64::new(current_epoch_ms()));
+
+    // Watchdog: Auto-exit background server when the user closes the UI window
+    if !args.headless {
+        let first_c = first_ui_poll.clone();
+        let last_c = last_ui_poll_ms.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(2));
+            loop {
+                interval.tick().await;
+                if first_c.load(Ordering::Relaxed) {
+                    let elapsed = current_epoch_ms().saturating_sub(last_c.load(Ordering::Relaxed));
+                    if elapsed > 12_000 {
+                        std::process::exit(0);
+                    }
+                }
+            }
+        });
     }
 
     let ctx = AppContext {
@@ -237,6 +494,10 @@ async fn main() -> Result<()> {
         routing_mode: Arc::new(RwLock::new("max_speed".to_string())),
         speed_test: Arc::new(RwLock::new(None)),
         update_info: Arc::new(RwLock::new(UpdateReleaseInfo::default())),
+        logs: Arc::new(RwLock::new(initial_logs)),
+        wlan_diag: Arc::new(RwLock::new(diag)),
+        first_ui_poll,
+        last_ui_poll_ms,
     };
 
     loop {
@@ -253,12 +514,12 @@ async fn main() -> Result<()> {
 fn launch_native_app_window(url: &str) {
     #[cfg(windows)]
     {
-        let edge_launched = Command::new("cmd")
+        let edge_launched = hidden_cmd("cmd")
             .args(["/C", "start", "", "msedge", &format!("--app={}", url)])
             .spawn()
             .is_ok();
         if !edge_launched {
-            let _ = Command::new("cmd")
+            let _ = hidden_cmd("cmd")
                 .args(["/C", "start", "", url])
                 .spawn();
         }
@@ -286,6 +547,8 @@ async fn handle_ui_http_connection(mut stream: TcpStream, ctx: AppContext) -> Re
     let body_str = req_str.split("\r\n\r\n").nth(1).unwrap_or("");
 
     if method == "GET" && (path == "/" || path == "/index.html") {
+        ctx.first_ui_poll.store(true, Ordering::Relaxed);
+        ctx.last_ui_poll_ms.store(current_epoch_ms(), Ordering::Relaxed);
         write_http_response(
             &mut stream,
             200,
@@ -296,7 +559,19 @@ async fn handle_ui_http_connection(mut stream: TcpStream, ctx: AppContext) -> Re
         return Ok(());
     }
 
+    if method == "POST" && path == "/api/app-close" {
+        write_http_response(&mut stream, 200, "application/json", b"{\"closing\":true}").await?;
+        tokio::spawn(async {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            std::process::exit(0);
+        });
+        return Ok(());
+    }
+
     if method == "GET" && path == "/api/status" {
+        ctx.first_ui_poll.store(true, Ordering::Relaxed);
+        ctx.last_ui_poll_ms.store(current_epoch_ms(), Ordering::Relaxed);
+
         let interfaces = ctx.inr.snapshots().await;
         let proxy = ctx.proxy.snapshot();
         let download = ctx.downloader.latest_progress().await;
@@ -306,6 +581,8 @@ async fn handle_ui_http_connection(mut stream: TcpStream, ctx: AppContext) -> Re
         let speed_test = ctx.speed_test.read().await.clone();
         let update_info = ctx.update_info.read().await.clone();
         let init_mode = ctx.initial_mode.read().await.clone();
+        let logs = ctx.logs.read().await.clone();
+        let wlan_diag = ctx.wlan_diag.read().await.clone();
 
         let payload = serde_json::json!({
             "initial_mode": init_mode,
@@ -315,6 +592,8 @@ async fn handle_ui_http_connection(mut stream: TcpStream, ctx: AppContext) -> Re
             "routing_mode": mode,
             "speed_test": speed_test,
             "update_info": update_info,
+            "logs": logs,
+            "wlan_diag": wlan_diag,
             "os_status": {
                 "is_elevated_admin": is_running_as_admin(),
                 "system_proxy_enabled": is_system_proxy_enabled(),
@@ -328,6 +607,122 @@ async fn handle_ui_http_connection(mut stream: TcpStream, ctx: AppContext) -> Re
         });
         let bytes = serde_json::to_vec(&payload)?;
         write_http_response(&mut stream, 200, "application/json", &bytes).await?;
+        return Ok(());
+    }
+
+    if method == "POST" && path == "/api/wifi-diagnostics" {
+        let diag = inspect_wlan_hardware();
+        *ctx.wlan_diag.write().await = diag.clone();
+        ctx.push_log(
+            if diag.physical_wifi_count == 1 && diag.max_secondary_stas == 0 {
+                "WARN"
+            } else {
+                "OK"
+            },
+            "WLAN-DIAG",
+            format!("{} — {}", diag.diagnosis_title, diag.diagnosis_explanation),
+        )
+        .await;
+        write_http_response(&mut stream, 200, "application/json", &serde_json::to_vec(&diag)?).await?;
+        return Ok(());
+    }
+
+    if method == "POST" && path == "/api/wifi-connect" {
+        #[derive(Deserialize)]
+        struct ConnectReq {
+            interface_name: String,
+            profile_ssid: String,
+            force_swap: Option<bool>,
+        }
+        if let Ok(req) = serde_json::from_str::<ConnectReq>(body_str) {
+            let diag = inspect_wlan_hardware();
+            let force = req.force_swap.unwrap_or(false);
+
+            // Check if the user is trying to connect a 2nd Wi-Fi on a single-radio card that is already connected
+            let target_adapter = diag
+                .wlan_adapters
+                .iter()
+                .find(|a| a.name.eq_ignore_ascii_case(&req.interface_name));
+
+            if let Some(adapter) = target_adapter {
+                if diag.physical_wifi_count == 1
+                    && diag.max_secondary_stas == 0
+                    && adapter.state.eq_ignore_ascii_case("connected")
+                    && !adapter.ssid.is_empty()
+                    && !adapter.ssid.eq_ignore_ascii_case(&req.profile_ssid)
+                    && !force
+                {
+                    let msg = format!(
+                        "BLOCKED ANTI-SWAP: Adapter '{}' ({}) is already connected to '{}' and has only 1 hardware radio (Max Secondary STAs = 0). Connecting '{}' on the same adapter would disconnect '{}'. Plug in a USB Wi-Fi Dongle (Wi-Fi 2) or connect your Phone via USB Tethering to run both Wi-Fi networks simultaneously!",
+                        adapter.name, adapter.description, adapter.ssid, req.profile_ssid, adapter.ssid
+                    );
+                    ctx.push_log("ERROR", "MULTI-WIFI", &msg).await;
+                    let resp = serde_json::json!({
+                        "ok": false,
+                        "blocked_swap": true,
+                        "message": msg
+                    });
+                    write_http_response(&mut stream, 200, "application/json", &serde_json::to_vec(&resp)?).await?;
+                    return Ok(());
+                }
+            }
+
+            // Ensure WcmSvc fMinimizeConnections=0 is enforced before connecting
+            let pal = create_platform_manager();
+            if let Ok(wan) = pal.enumerate_wan_candidates() {
+                let _ = apply_windows_multi_connector_optimizations(&wan, false);
+            }
+
+            let out = hidden_cmd("netsh")
+                .args([
+                    "wlan",
+                    "connect",
+                    &format!("name={}", req.profile_ssid),
+                    &format!("ssid={}", req.profile_ssid),
+                    &format!("interface={}", req.interface_name),
+                ])
+                .output();
+
+            let (ok, msg) = match out {
+                Ok(o) => {
+                    let stdout = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    let stderr = String::from_utf8_lossy(&o.stderr).trim().to_string();
+                    if o.status.success() {
+                        (
+                            true,
+                            format!(
+                                "Bound Wi-Fi '{}' to interface '{}': {}",
+                                req.profile_ssid, req.interface_name, stdout
+                            ),
+                        )
+                    } else {
+                        (
+                            false,
+                            format!(
+                                "netsh wlan connect failed on '{}': {} {}",
+                                req.interface_name, stdout, stderr
+                            ),
+                        )
+                    }
+                }
+                Err(e) => (false, format!("Failed to execute netsh wlan connect: {}", e)),
+            };
+
+            ctx.push_log(if ok { "OK" } else { "ERROR" }, "MULTI-WIFI", &msg)
+                .await;
+            *ctx.wlan_diag.write().await = inspect_wlan_hardware();
+            let _ = ctx.inr.refresh_and_probe(Duration::from_millis(1500)).await;
+
+            let resp = serde_json::json!({ "ok": ok, "message": msg });
+            write_http_response(&mut stream, 200, "application/json", &serde_json::to_vec(&resp)?).await?;
+            return Ok(());
+        }
+    }
+
+    if method == "POST" && path == "/api/logs-clear" {
+        ctx.logs.write().await.clear();
+        ctx.push_log("INFO", "LOGS", "Log history cleared by user.").await;
+        write_http_response(&mut stream, 200, "application/json", b"{\"ok\":true}").await?;
         return Ok(());
     }
 
@@ -487,6 +882,13 @@ async fn handle_ui_http_connection(mut stream: TcpStream, ctx: AppContext) -> Re
         let pal = create_platform_manager();
         let wan = pal.enumerate_wan_candidates().unwrap_or_default();
         let rep = apply_windows_multi_connector_optimizations(&wan, true);
+        let applied = rep.steps.iter().filter(|s| s.applied).count();
+        ctx.push_log(
+            if applied > 0 { "OK" } else { "WARN" },
+            "OS-OPTIMIZER",
+            format!("Executed OS Multi-WiFi Optimizer ({} steps applied).", applied),
+        )
+        .await;
         let bytes = serde_json::to_vec(&rep)?;
         write_http_response(&mut stream, 200, "application/json", &bytes).await?;
         return Ok(());
@@ -496,8 +898,14 @@ async fn handle_ui_http_connection(mut stream: TcpStream, ctx: AppContext) -> Re
         let currently_on = is_system_proxy_enabled();
         let res = set_windows_system_proxy(!currently_on, "127.0.0.1:1081");
         let payload = match res {
-            Ok(msg) => serde_json::json!({ "ok": true, "enabled": !currently_on, "message": msg }),
-            Err(err) => serde_json::json!({ "ok": false, "message": err }),
+            Ok(msg) => {
+                ctx.push_log("OK", "SYSTEM-PROXY", &msg).await;
+                serde_json::json!({ "ok": true, "enabled": !currently_on, "message": msg })
+            }
+            Err(err) => {
+                ctx.push_log("ERROR", "SYSTEM-PROXY", &err).await;
+                serde_json::json!({ "ok": false, "message": err })
+            }
         };
         let bytes = serde_json::to_vec(&payload)?;
         write_http_response(&mut stream, 200, "application/json", &bytes).await?;
@@ -591,7 +999,7 @@ fn create_windows_shortcut(target_exe: &std::path::Path, special_folder: &str, n
         name,
         target_exe.display()
     );
-    let _ = Command::new("powershell")
+    let _ = hidden_cmd("powershell")
         .args(["-NoProfile", "-Command", &ps])
         .output();
 }
@@ -603,32 +1011,32 @@ fn register_windows_uninstaller(
 ) {
     let key = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\WiFiGigaChad420";
     let uninst_cmd = format!("\"{}\" --uninstall", uninst_exe.display());
-    let _ = Command::new("reg")
+    let _ = hidden_cmd("reg")
         .args(["add", key, "/v", "DisplayName", "/d", "WiFi GigaChad 420", "/f"])
         .output();
-    let _ = Command::new("reg")
+    let _ = hidden_cmd("reg")
         .args(["add", key, "/v", "DisplayVersion", "/d", "0.1.0", "/f"])
         .output();
-    let _ = Command::new("reg")
+    let _ = hidden_cmd("reg")
         .args(["add", key, "/v", "Publisher", "/d", "cubicreates", "/f"])
         .output();
-    let _ = Command::new("reg")
+    let _ = hidden_cmd("reg")
         .args(["add", key, "/v", "InstallLocation", "/d", &install_dir.display().to_string(), "/f"])
         .output();
-    let _ = Command::new("reg")
+    let _ = hidden_cmd("reg")
         .args(["add", key, "/v", "DisplayIcon", "/d", &app_exe.display().to_string(), "/f"])
         .output();
-    let _ = Command::new("reg")
+    let _ = hidden_cmd("reg")
         .args(["add", key, "/v", "UninstallString", "/d", &uninst_cmd, "/f"])
         .output();
 }
 
 fn remove_windows_shortcuts_and_registry() {
     let key = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\WiFiGigaChad420";
-    let _ = Command::new("reg").args(["delete", key, "/f"]).output();
+    let _ = hidden_cmd("reg").args(["delete", key, "/f"]).output();
 
     let ps = "$ws = New-Object -ComObject WScript.Shell; foreach ($f in @('Desktop','StartMenu')) { $d = $ws.SpecialFolders($f); if ($d) { Remove-Item -Force (Join-Path $d 'WiFi GigaChad 420.lnk') -ErrorAction SilentlyContinue } }";
-    let _ = Command::new("powershell")
+    let _ = hidden_cmd("powershell")
         .args(["-NoProfile", "-Command", ps])
         .output();
 }
@@ -657,7 +1065,12 @@ async fn run_live_combined_speed_test(inr: &InrEngine) -> CombinedSpeedTestRepor
                 let ip_bind = local_ip.clone();
                 let range_str = format!("{}-{}", chunk_idx * 200_000, (chunk_idx + 1) * 200_000 - 1);
                 stream_tasks.spawn(async move {
-                    let out = tokio::process::Command::new("curl.exe")
+                    let mut cmd = tokio::process::Command::new("curl.exe");
+                    #[cfg(windows)]
+                    {
+                        cmd.creation_flags(CREATE_NO_WINDOW);
+                    }
+                    let out = cmd
                         .args([
                             "-sS",
                             "-L",

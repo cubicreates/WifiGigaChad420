@@ -15,6 +15,7 @@ const tsxFiles = [
   path.join(uiDir, 'src', 'screens', 'WifiDashboardScreen.tsx'),
   path.join(uiDir, 'src', 'screens', 'OngoingProcessesScreen.tsx'),
   path.join(uiDir, 'src', 'screens', 'SystemMeshInfoScreen.tsx'),
+  path.join(uiDir, 'src', 'screens', 'LogsScreen.tsx'),
   path.join(uiDir, 'src', 'App.tsx'),
 ];
 

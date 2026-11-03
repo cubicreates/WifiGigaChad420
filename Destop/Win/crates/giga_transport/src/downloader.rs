@@ -22,6 +22,15 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio::sync::Mutex;
 
+fn hidden_curl_cmd() -> Command {
+    let mut c = Command::new("curl.exe");
+    #[cfg(windows)]
+    {
+        c.creation_flags(0x0800_0000);
+    }
+    c
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParsedUrl {
     pub is_tls: bool,
@@ -439,7 +448,7 @@ impl MultiPathDownloader {
             .to_string();
         let range_arg = format!("{}-{}", chunk.current_byte, chunk.end_byte);
 
-        let mut child = Command::new("curl.exe")
+        let mut child = hidden_curl_cmd()
             .args([
                 "-sS",
                 "-L",
@@ -600,7 +609,7 @@ impl MultiPathDownloader {
                 .primary_ipv4()
                 .ok_or_else(|| "Interface has no IPv4".to_string())?
                 .to_string();
-            let out = Command::new("curl.exe")
+            let out = hidden_curl_cmd()
                 .args([
                     "-s",
                     "-D",
@@ -668,7 +677,7 @@ impl MultiPathDownloader {
                 .primary_ipv4()
                 .ok_or_else(|| "Interface has no IPv4".to_string())?
                 .to_string();
-            let mut child = Command::new("curl.exe")
+            let mut child = hidden_curl_cmd()
                 .args(["-sS", "-L", "--interface", &local_ip, url])
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())

@@ -5,7 +5,20 @@
 
 use crate::interface::InterfaceSnapshot;
 use serde::{Deserialize, Serialize};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::process::Command;
+
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+fn hidden_cmd(program: &str) -> Command {
+    let mut c = Command::new(program);
+    #[cfg(windows)]
+    {
+        c.creation_flags(CREATE_NO_WINDOW);
+    }
+    c
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OsOptimizationStep {
@@ -27,7 +40,7 @@ pub fn is_running_as_admin() -> bool {
     #[cfg(windows)]
     {
         // `net session` succeeds (exit code 0) if and only if the process token is elevated.
-        Command::new("net")
+        hidden_cmd("net")
             .args(["session"])
             .output()
             .map(|o| o.status.success())
@@ -43,7 +56,7 @@ pub fn is_running_as_admin() -> bool {
 pub fn is_system_proxy_enabled() -> bool {
     #[cfg(windows)]
     {
-        let Ok(out) = Command::new("reg")
+        let Ok(out) = hidden_cmd("reg")
             .args([
                 "query",
                 r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings",
@@ -70,7 +83,7 @@ pub fn set_windows_system_proxy(enable: bool, http_proxy_addr: &str) -> Result<S
     {
         let reg_key = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings";
         if enable {
-            let _ = Command::new("reg")
+            let _ = hidden_cmd("reg")
                 .args([
                     "add",
                     reg_key,
@@ -85,7 +98,7 @@ pub fn set_windows_system_proxy(enable: bool, http_proxy_addr: &str) -> Result<S
                 .output()
                 .map_err(|e| e.to_string())?;
 
-            let _ = Command::new("reg")
+            let _ = hidden_cmd("reg")
                 .args([
                     "add",
                     reg_key,
@@ -100,7 +113,7 @@ pub fn set_windows_system_proxy(enable: bool, http_proxy_addr: &str) -> Result<S
                 .output()
                 .map_err(|e| e.to_string())?;
 
-            let out = Command::new("reg")
+            let out = hidden_cmd("reg")
                 .args([
                     "add",
                     reg_key,
@@ -124,7 +137,7 @@ pub fn set_windows_system_proxy(enable: bool, http_proxy_addr: &str) -> Result<S
                 Err(String::from_utf8_lossy(&out.stderr).to_string())
             }
         } else {
-            let out = Command::new("reg")
+            let out = hidden_cmd("reg")
                 .args([
                     "add",
                     reg_key,
@@ -187,45 +200,50 @@ pub fn apply_windows_multi_connector_optimizations(
         }
     }
 
-    // 1. Disable Windows Connection Manager `fMinimizeConnections` so Windows keeps multiple Wi-Fi
-    //    and Ethernet adapters connected simultaneously.
-    let wcm_out = Command::new("reg")
-        .args([
-            "add",
-            r"HKLM\Software\Policies\Microsoft\Windows\WcmSvc\GroupPolicy",
-            "/v",
-            "fMinimizeConnections",
-            "/t",
-            "REG_DWORD",
-            "/d",
-            "0",
-            "/f",
-        ])
-        .output();
-
-    match wcm_out {
-        Ok(o) if o.status.success() => steps.push(OsOptimizationStep {
-            title: "Simultaneous Multi-WiFi & Ethernet Policy (fMinimizeConnections = 0)".to_string(),
-            command_desc: r"reg add HKLM\...\WcmSvc\GroupPolicy /v fMinimizeConnections /d 0".to_string(),
-            applied: true,
-            detail: "Windows will no longer auto-disconnect Wi-Fi when Ethernet or a 2nd Wi-Fi dongle connects.".to_string(),
-        }),
-        _ => steps.push(OsOptimizationStep {
-            title: "Simultaneous Multi-WiFi & Ethernet Policy (fMinimizeConnections = 0)".to_string(),
-            command_desc: r"reg add HKLM\...\WcmSvc\GroupPolicy /v fMinimizeConnections /d 0".to_string(),
-            applied: is_admin,
-            detail: if is_admin {
-                "Configured via elevated UAC batch.".to_string()
-            } else {
-                "Requires Administrator UAC access to modify HKLM WcmSvc policy.".to_string()
-            },
-        }),
+    // 1. Disable Windows Connection Manager `fMinimizeConnections` & `fBlockNonDomain` across all 3 WcmSvc keys
+    let wcm_keys = [
+        (r"HKLM\Software\Policies\Microsoft\Windows\WcmSvc\GroupPolicy", "fMinimizeConnections"),
+        (r"HKLM\Software\Policies\Microsoft\Windows\WcmSvc\GroupPolicy", "fBlockNonDomain"),
+        (r"HKLM\Software\Microsoft\WcmSvc\wifinetworkmanager\config", "fMinimizeConnections"),
+        (r"HKLM\SYSTEM\CurrentControlSet\Services\WcmSvc\Parameters", "fMinimizeConnections"),
+    ];
+    let mut wcm_any_ok = false;
+    for (key_path, val_name) in wcm_keys {
+        if let Ok(o) = hidden_cmd("reg")
+            .args([
+                "add",
+                key_path,
+                "/v",
+                val_name,
+                "/t",
+                "REG_DWORD",
+                "/d",
+                "0",
+                "/f",
+            ])
+            .output()
+        {
+            if o.status.success() {
+                wcm_any_ok = true;
+            }
+        }
     }
+
+    steps.push(OsOptimizationStep {
+        title: "Simultaneous Multi-WiFi & Anti-Swap Policy (fMinimizeConnections = 0 & fBlockNonDomain = 0)".to_string(),
+        command_desc: r"reg add HKLM\...\WcmSvc\GroupPolicy & Parameters /v fMinimizeConnections /d 0".to_string(),
+        applied: wcm_any_ok || is_admin,
+        detail: if wcm_any_ok || is_admin {
+            "Disabled Windows Connection Manager auto-disconnect across GroupPolicy, wifinetworkmanager, and WcmSvc Parameters.".to_string()
+        } else {
+            "Requires Administrator UAC access to modify HKLM WcmSvc policy.".to_string()
+        },
+    });
 
     // 2. Equalize IPv4 Interface Metrics across all active WAN connectors so secondary adapters aren't starved
     for iface in wan_interfaces {
         let idx_str = iface.if_index.to_string();
-        let netsh_out = Command::new("netsh")
+        let netsh_out = hidden_cmd("netsh")
             .args([
                 "interface",
                 "ipv4",
@@ -253,7 +271,7 @@ pub fn apply_windows_multi_connector_optimizations(
     }
 
     // 3. Windows Defender Firewall rules for Cross-Device Phone <-> Laptop Wi-Fi Mesh (UDP 42069 / TCP 42070)
-    let fw_out = Command::new("netsh")
+    let fw_out = hidden_cmd("netsh")
         .args([
             "advfirewall",
             "firewall",
@@ -279,7 +297,7 @@ pub fn apply_windows_multi_connector_optimizations(
     });
 
     // 4. TCP Receive Window Auto-Tuning for High-BDP Multi-NIC Striping
-    let tcp_out = Command::new("netsh")
+    let tcp_out = hidden_cmd("netsh")
         .args(["int", "tcp", "set", "global", "autotuninglevel=normal"])
         .output();
     let tcp_ok = tcp_out.map(|o| o.status.success()).unwrap_or(false) || is_admin;
@@ -306,6 +324,9 @@ pub fn apply_windows_multi_connector_optimizations(
 fn run_elevated_uac_optimization_batch(wan_interfaces: &[InterfaceSnapshot]) -> Result<(), String> {
     let mut script_lines = vec![
         r"reg add 'HKLM\Software\Policies\Microsoft\Windows\WcmSvc\GroupPolicy' /v fMinimizeConnections /t REG_DWORD /d 0 /f".to_string(),
+        r"reg add 'HKLM\Software\Policies\Microsoft\Windows\WcmSvc\GroupPolicy' /v fBlockNonDomain /t REG_DWORD /d 0 /f".to_string(),
+        r"reg add 'HKLM\Software\Microsoft\WcmSvc\wifinetworkmanager\config' /v fMinimizeConnections /t REG_DWORD /d 0 /f".to_string(),
+        r"reg add 'HKLM\SYSTEM\CurrentControlSet\Services\WcmSvc\Parameters' /v fMinimizeConnections /t REG_DWORD /d 0 /f".to_string(),
         r"netsh advfirewall firewall delete rule name='WiFiGigaChad420-Mesh-UDP' | Out-Null".to_string(),
         r"netsh advfirewall firewall add rule name='WiFiGigaChad420-Mesh-UDP' dir=in action=allow protocol=UDP localport=42069 | Out-Null".to_string(),
         r"netsh advfirewall firewall delete rule name='WiFiGigaChad420-Mesh-TCP' | Out-Null".to_string(),
@@ -326,7 +347,7 @@ fn run_elevated_uac_optimization_batch(wan_interfaces: &[InterfaceSnapshot]) -> 
         joined.replace('"', "\\\"")
     );
 
-    let out = Command::new("powershell")
+    let out = hidden_cmd("powershell")
         .args(["-NoProfile", "-Command", &ps_cmd])
         .output()
         .map_err(|e| format!("Failed to invoke UAC prompt: {}", e))?;

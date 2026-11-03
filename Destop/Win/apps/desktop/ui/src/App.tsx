@@ -10,6 +10,7 @@ import {
 import { renderOngoingProcessesScreen } from './screens/OngoingProcessesScreen';
 import { renderSystemMeshInfoScreen } from './screens/SystemMeshInfoScreen';
 import { renderWifiDashboardScreen } from './screens/WifiDashboardScreen';
+import { renderLogsScreen } from './screens/LogsScreen';
 import { ActiveScreenId, SystemStatusPayload } from './types/telemetry';
 
 export interface AppState {
@@ -25,6 +26,7 @@ export interface AppState {
   dnsHost: string;
   dnsOutput: string;
   osLogOutput: string | null;
+  wifiConnectStatus: string | null;
 }
 
 export const InstallerStore: InstallerState & {
@@ -114,6 +116,7 @@ export const Store: AppState & { setState: (patch: Partial<AppState>) => void } 
   dnsHost: 'github.com',
   dnsOutput: 'Click "Test Fastest DNS" to race DNS across your connected Wi-Fi adapters.',
   osLogOutput: null,
+  wifiConnectStatus: null,
 
   setState(patch: Partial<AppState>) {
     Object.assign(this, patch);
@@ -275,6 +278,36 @@ export async function handleInstallUpdate(): Promise<void> {
   }, 1800);
 }
 
+export async function handleRunWifiDiagnostics(): Promise<void> {
+  await fetch('/api/wifi-diagnostics', { method: 'POST' });
+  pollBackend();
+}
+
+export async function handleConnectWifiOnAdapter(forceSwap: boolean): Promise<void> {
+  const ifEl = document.getElementById('wifi-conn-iface') as HTMLSelectElement | null;
+  const ssidEl = document.getElementById('wifi-conn-ssid') as HTMLSelectElement | null;
+  const interface_name = ifEl ? ifEl.value : 'Wi-Fi';
+  const profile_ssid = ssidEl ? ssidEl.value : '';
+
+  Store.setState({
+    wifiConnectStatus: `Binding Wi-Fi profile '${profile_ssid}' to adapter '${interface_name}'...`,
+  });
+
+  const res = await fetch('/api/wifi-connect', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ interface_name, profile_ssid, force_swap: forceSwap }),
+  });
+  const out = await res.json();
+  Store.setState({ wifiConnectStatus: out.message || 'Done.' });
+  pollBackend();
+}
+
+export async function handleClearLogs(): Promise<void> {
+  await fetch('/api/logs-clear', { method: 'POST' });
+  pollBackend();
+}
+
 export function renderApp(): void {
   const root = document.getElementById('root');
   if (!root) return;
@@ -285,7 +318,9 @@ export function renderApp(): void {
     activeId === 'dl-out-input' ||
     activeId === 'dns-host-input' ||
     activeId === 'inst-dir-input' ||
-    activeId === 'uninst-reason'
+    activeId === 'uninst-reason' ||
+    activeId === 'wifi-conn-iface' ||
+    activeId === 'wifi-conn-ssid'
   ) {
     return;
   }
@@ -327,6 +362,7 @@ export function renderApp(): void {
       totalTransferredBytes,
       routingMode: Store.data.routing_mode,
       speedTest: Store.data.speed_test,
+      wlanDiag: Store.data.wlan_diag,
     });
   } else if (Store.activeScreen === 'processes') {
     activeScreenHtml = renderOngoingProcessesScreen({
@@ -337,6 +373,8 @@ export function renderApp(): void {
       dlUrl: Store.dlForm.url,
       dlOutput: Store.dlForm.output,
     });
+  } else if (Store.activeScreen === 'logs') {
+    activeScreenHtml = renderLogsScreen(Store.data, Store.wifiConnectStatus);
   } else {
     activeScreenHtml = renderSystemMeshInfoScreen({
       isElevatedAdmin:
@@ -377,6 +415,12 @@ export function renderApp(): void {
     </div>
   `;
 }
+
+window.addEventListener('beforeunload', () => {
+  try {
+    navigator.sendBeacon('/api/app-close');
+  } catch (_) {}
+});
 
 renderApp();
 pollBackend();
