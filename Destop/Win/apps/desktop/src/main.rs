@@ -21,9 +21,9 @@ const EMBEDDED_UI_HTML: &str = include_str!(concat!(env!("OUT_DIR"), "/ui_bundle
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "giga-desktop",
+    name = "WifiGigaChad420",
     version,
-    about = "WiFi GigaChad 420 — Windows Desktop App, Setup Installer & Uninstaller"
+    about = "WiFi GigaChad 420 — Unified Windows Desktop App, Setup Installer, Uninstaller & CLI"
 )]
 struct DesktopArgs {
     /// Local port for the Desktop Control Center UI & Telemetry Server
@@ -41,6 +41,10 @@ struct DesktopArgs {
     /// Launch directly in Professional Uninstaller Popup Wizard mode
     #[arg(long)]
     uninstall: bool,
+
+    /// Optional CLI command mode (e.g., `interfaces`, `os-optimize`)
+    #[arg(long)]
+    cli: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,7 +99,7 @@ impl Default for UpdateReleaseInfo {
 
 #[derive(Clone)]
 struct AppContext {
-    initial_mode: String,
+    initial_mode: Arc<RwLock<String>>,
     inr: InrEngine,
     proxy: SystemProxyGateway,
     downloader: MultiPathDownloader,
@@ -103,6 +107,20 @@ struct AppContext {
     routing_mode: Arc<RwLock<String>>,
     speed_test: Arc<RwLock<Option<CombinedSpeedTestReport>>>,
     update_info: Arc<RwLock<UpdateReleaseInfo>>,
+}
+
+fn is_app_installed() -> bool {
+    if PathBuf::from(r"C:\Users\Public\WiFiGigaChad420\installed.marker").exists() {
+        return true;
+    }
+    Command::new("reg")
+        .args([
+            "query",
+            r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\WiFiGigaChad420",
+        ])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 #[tokio::main]
@@ -116,15 +134,35 @@ async fn main() -> Result<()> {
 
     let args = DesktopArgs::parse();
 
-    // Detect mode from CLI flags or executable filename (`Installer.exe` / `Uninstall.exe`)
-    let exe_name = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.file_name().map(|f| f.to_string_lossy().to_ascii_lowercase()))
-        .unwrap_or_default();
+    // Built-in CLI execution inside the single unified executable
+    if let Some(cli_cmd) = &args.cli {
+        let pal = create_platform_manager();
+        match cli_cmd.as_str() {
+            "interfaces" => {
+                let ifaces = pal.enumerate_wan_candidates()?;
+                println!("{}", serde_json::to_string_pretty(&ifaces)?);
+                return Ok(());
+            }
+            "os-optimize" => {
+                let ifaces = pal.enumerate_wan_candidates().unwrap_or_default();
+                let rep = apply_windows_multi_connector_optimizations(&ifaces, true);
+                println!("{}", serde_json::to_string_pretty(&rep)?);
+                return Ok(());
+            }
+            _ => {
+                println!("Supported --cli commands: interfaces, os-optimize");
+                return Ok(());
+            }
+        }
+    }
 
-    let initial_mode = if args.uninstall || exe_name.contains("uninstall") {
+    // Unified single-executable mode detection:
+    // 1. `--uninstall` -> Uninstaller Popup Wizard
+    // 2. `--installer` or First Run (`!is_app_installed()`) -> Setup Installer Wizard
+    // 3. Otherwise -> Main 3-Screen Dashboard
+    let initial_mode = if args.uninstall {
         "uninstaller".to_string()
-    } else if args.installer || exe_name.contains("installer") {
+    } else if args.installer || !is_app_installed() {
         "installer".to_string()
     } else {
         "normal".to_string()
@@ -174,7 +212,7 @@ async fn main() -> Result<()> {
     let url = format!("http://{}", bound_addr);
 
     println!("================================================================================");
-    println!(" WIFI GIGACHAD 420 — WINDOWS DESKTOP APPLICATION ({})", initial_mode.to_uppercase());
+    println!(" WIFI GIGACHAD 420 — UNIFIED WINDOWS EXECUTABLE ({})", initial_mode.to_uppercase());
     println!("================================================================================");
     println!("  UI Endpoint       : {}", url);
     println!("  Admin Elevation   : {}", is_running_as_admin());
@@ -191,7 +229,7 @@ async fn main() -> Result<()> {
     }
 
     let ctx = AppContext {
-        initial_mode,
+        initial_mode: Arc::new(RwLock::new(initial_mode)),
         inr,
         proxy,
         downloader,
@@ -267,9 +305,10 @@ async fn handle_ui_http_connection(mut stream: TcpStream, ctx: AppContext) -> Re
         let mode = ctx.routing_mode.read().await.clone();
         let speed_test = ctx.speed_test.read().await.clone();
         let update_info = ctx.update_info.read().await.clone();
+        let init_mode = ctx.initial_mode.read().await.clone();
 
         let payload = serde_json::json!({
-            "initial_mode": ctx.initial_mode,
+            "initial_mode": init_mode,
             "interfaces": interfaces,
             "proxy": proxy,
             "download": download,
@@ -336,15 +375,15 @@ async fn handle_ui_http_connection(mut stream: TcpStream, ctx: AppContext) -> Re
         if let Ok(req) = serde_json::from_str::<InstReq>(body_str) {
             let target_dir = PathBuf::from(&req.install_dir);
             let _ = std::fs::create_dir_all(&target_dir);
+            let _ = std::fs::write(target_dir.join("installed.marker"), b"installed");
+            let _ = std::fs::create_dir_all(r"C:\Users\Public\WiFiGigaChad420");
+            let _ = std::fs::write(r"C:\Users\Public\WiFiGigaChad420\installed.marker", b"installed");
             logs.push(format!("[OK] Created installation directory: {}", target_dir.display()));
 
             if let Ok(curr_exe) = std::env::current_exe() {
-                let app_dest = target_dir.join("WiFi-GigaChad-420.exe");
-                let uninst_dest = target_dir.join("WiFi-GigaChad-420-Uninstall.exe");
+                let app_dest = target_dir.join("WifiGigaChad420.exe");
                 let _ = std::fs::copy(&curr_exe, &app_dest);
-                let _ = std::fs::copy(&curr_exe, &uninst_dest);
-                logs.push(format!("[OK] Installed main executable: {}", app_dest.display()));
-                logs.push(format!("[OK] Installed uninstaller: {}", uninst_dest.display()));
+                logs.push(format!("[OK] Installed unified executable: {}", app_dest.display()));
 
                 if req.desktop_shortcut {
                     create_windows_shortcut(&app_dest, "Desktop", "WiFi GigaChad 420");
@@ -352,9 +391,9 @@ async fn handle_ui_http_connection(mut stream: TcpStream, ctx: AppContext) -> Re
                 }
                 if req.start_menu_shortcut {
                     create_windows_shortcut(&app_dest, "StartMenu", "WiFi GigaChad 420");
-                    register_windows_uninstaller(&target_dir, &app_dest, &uninst_dest);
-                    logs.push("[OK] Registered in Windows Settings -> Installed Apps / Programs".to_string());
                 }
+                register_windows_uninstaller(&target_dir, &app_dest, &app_dest);
+                logs.push("[OK] Registered in Windows Settings -> Installed Apps (WifiGigaChad420.exe --uninstall)".to_string());
             }
 
             if req.optimize_os {
@@ -366,6 +405,7 @@ async fn handle_ui_http_connection(mut stream: TcpStream, ctx: AppContext) -> Re
                     rep.steps.iter().filter(|s| s.applied).count()
                 ));
             }
+            *ctx.initial_mode.write().await = "normal".to_string();
         }
         let resp = serde_json::json!({ "ok": true, "logs": logs });
         write_http_response(&mut stream, 200, "application/json", &serde_json::to_vec(&resp)?).await?;
@@ -391,11 +431,13 @@ async fn handle_ui_http_connection(mut stream: TcpStream, ctx: AppContext) -> Re
             }
             if req.remove_shortcuts {
                 remove_windows_shortcuts_and_registry();
+                let _ = std::fs::remove_file(r"C:\Users\Public\WiFiGigaChad420\installed.marker");
                 logs.push("[OK] Removed Desktop/Start Menu shortcuts & Windows Installed Apps entry.".to_string());
             }
             if req.delete_configs {
                 logs.push("[OK] Cleaned up local session manifests and temporary files.".to_string());
             }
+            *ctx.initial_mode.write().await = "installer".to_string();
             logs.push("[DONE] WiFi GigaChad 420 has been cleanly uninstalled.".to_string());
         }
         let resp = serde_json::json!({ "ok": true, "logs": logs });

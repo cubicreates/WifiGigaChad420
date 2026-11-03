@@ -49,7 +49,8 @@ GNU GENERAL PUBLIC LICENSE (GPLv3) — WiFi GigaChad 420
 • Zero-Latency Parallel DNS Race Resolver &amp; 150ms Happy Eyeballs Failover
 • Cross-Device Phone &lt;-&gt; Laptop Common Wi-Fi Mesh Bridge
             </div>
-            <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:8px;">
+            <div style="display:flex;justify-content:space-between;gap:10px;margin-top:8px;">
+              <button class="btn btn-secondary" onclick="Store.setState({appMode:'normal'});renderApp();">Run Portable (Skip Setup)</button>
               <button class="btn" onclick="InstallerStore.setStep(2)">Accept &amp; Continue &rarr;</button>
             </div>
           </div>
@@ -151,7 +152,7 @@ export function renderUninstallerPopup(state: UninstallerState): string {
             </div>
 
             <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:6px;">
-              <button class="btn btn-secondary" onclick="window.close()">Cancel</button>
+              <button class="btn btn-secondary" onclick="Store.setState({appMode:'normal'});renderApp();">Cancel / Back to App</button>
               <button class="btn" style="background:linear-gradient(135deg,#ef4444,#dc2626);" onclick="runUninstallNow()">Uninstall Now</button>
             </div>
           </div>
