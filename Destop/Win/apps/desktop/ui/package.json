@@ -1,0 +1,16 @@
+{
+  "name": "gigachad-desktop-ui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Modular React + TypeScript (TSX) 3-Screen & Sidebar UI for WiFi GigaChad 420",
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "typescript": "^5.5.4"
+  }
+}
+

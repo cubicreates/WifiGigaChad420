@@ -1,5 +1,6 @@
 pub mod independence;
 pub mod interface;
+pub mod os_optimizer;
 pub mod socket;
 
 #[cfg(windows)]
@@ -9,6 +10,10 @@ pub use independence::{IndependenceReport, WanIndependenceStatus, verify_pool_in
 pub use interface::{
     InterfaceId, InterfaceSnapshot, InterfaceState, InterfaceType, PalError,
     PlatformNetworkManager, WifiTelemetry,
+};
+pub use os_optimizer::{
+    OsOptimizationReport, OsOptimizationStep, apply_windows_multi_connector_optimizations,
+    is_running_as_admin, is_system_proxy_enabled, set_windows_system_proxy,
 };
 pub use socket::{
     BoundConnectResult, connect_bound_tcp_v4, create_bound_tcp_socket_v4,

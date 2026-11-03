@@ -3,8 +3,8 @@ use clap::{Parser, Subcommand};
 use giga_inr::{HealthScoreSnapshot, InrEngine};
 use giga_mesh::MeshBridgeEngine;
 use giga_pal::{
-    connect_bound_tcp_v4, create_platform_manager, verify_pool_independence, InterfaceSnapshot,
-    InterfaceType,
+    apply_windows_multi_connector_optimizations, connect_bound_tcp_v4, create_platform_manager,
+    verify_pool_independence, InterfaceSnapshot, InterfaceType,
 };
 use giga_transport::{MultiPathDownloader, ProxyGatewayConfig, SystemProxyGateway};
 use std::net::SocketAddr;
@@ -96,6 +96,12 @@ enum Commands {
         #[arg(long, default_value_t = 2000)]
         listen_ms: u64,
     },
+    /// Request Windows UAC Administrator access and apply OS Multi-WiFi / Multi-Connector modifications
+    OsOptimize {
+        /// Prompt for Windows UAC elevation if not already running as Administrator
+        #[arg(long, default_value_t = true)]
+        uac: bool,
+    },
 }
 
 #[tokio::main]
@@ -136,6 +142,7 @@ async fn main() -> Result<()> {
         Commands::MeshScan { listen_ms } => {
             cmd_mesh_scan(Duration::from_millis(listen_ms), cli.json).await?
         }
+        Commands::OsOptimize { uac } => cmd_os_optimize(uac, cli.json)?,
     }
 
     Ok(())
@@ -539,5 +546,34 @@ async fn cmd_mesh_scan(listen_duration: Duration, json_output: bool) -> Result<(
     }
     println!("================================================================================");
 
+    Ok(())
+}
+
+fn cmd_os_optimize(prompt_uac: bool, json_output: bool) -> Result<()> {
+    let pal = create_platform_manager();
+    let wan = pal.enumerate_wan_candidates().unwrap_or_default();
+    let report = apply_windows_multi_connector_optimizations(&wan, prompt_uac);
+
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+
+    println!("================================================================================");
+    println!(" WIFI GIGACHAD 420 — WINDOWS OS MULTI-WIFI & MULTI-CONNECTOR OPTIMIZER");
+    println!("================================================================================");
+    println!("  Elevated Administrator : {}", report.is_elevated_admin);
+    println!("  System Proxy Enabled   : {}", report.system_proxy_enabled);
+    println!("--------------------------------------------------------------------------------");
+    for step in &report.steps {
+        println!(
+            "  [{}] {}",
+            if step.applied { "APPLIED" } else { "PENDING" },
+            step.title
+        );
+        println!("    Command : {}", step.command_desc);
+        println!("    Status  : {}", step.detail);
+    }
+    println!("================================================================================");
     Ok(())
 }
