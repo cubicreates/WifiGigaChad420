@@ -37,7 +37,7 @@ export function renderSidebar(props: SidebarProps): string {
         <div class="brand-logo">GIGACHAD 420</div>
         <div class="brand-text">
           <h1>Wi-Fi Aggregator</h1>
-          <span>v${props.currentVersion} • Multi-NIC</span>
+          <span>${props.currentVersion.startsWith('TST-') ? props.currentVersion : 'v' + props.currentVersion} • Multi-NIC</span>
         </div>
       </div>
 

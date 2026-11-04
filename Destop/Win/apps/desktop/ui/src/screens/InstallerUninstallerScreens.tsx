@@ -29,7 +29,7 @@ export function renderInstallerWizard(state: InstallerState): string {
             <span class="brand-logo">GIGACHAD 420</span>
             <div>
               <div class="card-title">WiFi GigaChad 420 — Professional Setup Wizard</div>
-              <div style="font-size:11px;color:var(--text-muted);font-family:var(--mono);">Windows Multi-Interface Aggregator &amp; Intelligent Network Resolver v0.1.0</div>
+              <div style="font-size:11px;color:var(--text-muted);font-family:var(--mono);">Windows Multi-Interface Aggregator &amp; Intelligent Network Resolver TST-0.1.3.11.2026</div>
             </div>
           </div>
           <span class="badge badge-healthy">STEP ${state.step} OF 3</span>

@@ -87,15 +87,17 @@ export const Store: AppState & { setState: (patch: Partial<AppState>) => void } 
     routing_mode: 'max_speed',
     speed_test: null,
     update_info: {
-      current_version: '0.1.0',
-      latest_version: '0.2.0',
+      current_version: 'TST-0.1.3.11.2026',
+      latest_version: 'TST-0.2.3.11.2026',
       update_available: true,
+      version_mismatch: false,
       channel: 'STABLE',
-      release_title: 'WiFi GigaChad 420 v0.2.0 Available',
+      release_title: 'WiFi GigaChad 420 TST-0.2.3.11.2026 Update Ready',
       highlights: [
-        'Enhanced Multi-Wi-Fi Kalman Scheduler & 150ms Happy Eyeballs Failover',
-        'Faster Cross-Device Phone <-> Laptop Wi-Fi Mesh Tunneling',
-        'Improved Windows 11 802.11ax/be PHY Telemetry Polling',
+        'Version Format: Standardized TST-0.X.3.11.2026 Release Architecture',
+        'Automatic Version Mismatch Verification & Zero-Downtime Migration',
+        'Enhanced Laptop-Only Tri-Link Multi-SSID Direct Selector (Anti-Swap Active)',
+        '150ms Happy Eyeballs Multi-Path Proxy & Parallel DNS Race Resolver',
       ],
       installing: false,
       progress_pct: 0,
@@ -452,7 +454,7 @@ export function renderApp(): void {
         activeAdapterCount: ifaces.length,
         isElevatedAdmin:
           Store.data.os_status && Store.data.os_status.is_elevated_admin,
-        currentVersion: Store.data.update_info?.current_version || '0.1.0',
+        currentVersion: Store.data.update_info?.current_version || 'TST-0.1.3.11.2026',
       })}
       <main class="main-viewport">
         ${activeScreenHtml}
@@ -475,8 +477,8 @@ setTimeout(() => {
   if (
     Store.appMode === 'normal' &&
     Store.data.update_info &&
-    Store.data.update_info.update_available
+    (Store.data.update_info.update_available || Store.data.update_info.version_mismatch)
   ) {
     Store.setState({ showUpdatePopup: true });
   }
-}, 2500);
+}, 1800);

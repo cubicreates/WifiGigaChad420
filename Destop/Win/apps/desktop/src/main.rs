@@ -76,10 +76,63 @@ pub struct WlanHardwareDiagnostics {
 
 const EMBEDDED_UI_HTML: &str = include_str!(concat!(env!("OUT_DIR"), "/ui_bundle.html"));
 
+pub const APP_VERSION_PREFIX: &str = "TST";
+pub const APP_VERSION_SUFFIX: &str = "3.11.2026";
+pub const APP_VERSION_V1: &str = "TST-0.1.3.11.2026";
+pub const APP_VERSION_V2: &str = "TST-0.2.3.11.2026";
+
+/// The current compiled base version of this executable
+pub const CURRENT_APP_VERSION: &str = APP_VERSION_V1;
+/// The target next release version
+pub const LATEST_APP_VERSION: &str = APP_VERSION_V2;
+
+/// Checks if two version strings differ, signaling an update is available or in progress.
+pub fn is_version_mismatch(current: &str, target: &str) -> bool {
+    current.trim() != target.trim()
+}
+
+/// Validates that a version string adheres to the standard TST-0.X.3.11.2026 format.
+pub fn is_valid_tst_version(v: &str) -> bool {
+    v.starts_with(&format!("{}-0.", APP_VERSION_PREFIX)) && v.ends_with(&format!(".{}", APP_VERSION_SUFFIX))
+}
+
+/// Generates a standardized version string given a minor version number (e.g. 1 -> "TST-0.1.3.11.2026").
+pub fn format_tst_version(minor: u32) -> String {
+    format!("{}-0.{}.{}", APP_VERSION_PREFIX, minor, APP_VERSION_SUFFIX)
+}
+
+/// Retrieves persistent path for version tracking on Windows (%LOCALAPPDATA%\WiFiGigaChad420\installed_version.txt).
+pub fn get_version_storage_path() -> std::path::PathBuf {
+    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+        let dir = std::path::PathBuf::from(local_app_data).join("WiFiGigaChad420");
+        let _ = std::fs::create_dir_all(&dir);
+        dir.join("installed_version.txt")
+    } else {
+        let dir = std::path::PathBuf::from("C:\\Users\\Public\\WiFiGigaChad420");
+        let _ = std::fs::create_dir_all(&dir);
+        dir.join("installed_version.txt")
+    }
+}
+
+/// Reads the currently registered / installed version from disk.
+pub fn read_installed_version_from_disk() -> Option<String> {
+    let p = get_version_storage_path();
+    std::fs::read_to_string(p).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+/// Writes the newly installed or updated version to persistent disk storage.
+pub fn write_installed_version_to_disk(version: &str) -> Result<(), std::io::Error> {
+    let p = get_version_storage_path();
+    if let Some(parent) = p.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(p, version.trim())
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "WifiGigaChad420",
-    version,
+    version = CURRENT_APP_VERSION,
     about = "WiFi GigaChad 420 — Unified Windows Desktop App, Setup Installer, Uninstaller & CLI"
 )]
 struct DesktopArgs {
@@ -128,6 +181,8 @@ pub struct UpdateReleaseInfo {
     pub current_version: String,
     pub latest_version: String,
     pub update_available: bool,
+    pub version_mismatch: bool,
+    pub previous_version: Option<String>,
     pub channel: String,
     pub release_title: String,
     pub highlights: Vec<String>,
@@ -137,16 +192,40 @@ pub struct UpdateReleaseInfo {
 
 impl Default for UpdateReleaseInfo {
     fn default() -> Self {
+        let disk_version = read_installed_version_from_disk();
+        let running_version = CURRENT_APP_VERSION.to_string();
+        let target_version = LATEST_APP_VERSION.to_string();
+
+        let (cur_v, mismatch, prev_v) = match disk_version {
+            Some(stored) if stored != running_version => {
+                // Version mismatch between what was recorded on disk and this running binary!
+                (running_version.clone(), true, Some(stored))
+            }
+            Some(stored) => {
+                let diff = is_version_mismatch(&stored, &target_version);
+                (stored, diff, None)
+            }
+            None => {
+                let _ = write_installed_version_to_disk(&running_version);
+                (running_version.clone(), is_version_mismatch(&running_version, &target_version), None)
+            }
+        };
+
+        let update_avail = mismatch || is_version_mismatch(&cur_v, &target_version);
+
         Self {
-            current_version: "0.1.0".to_string(),
-            latest_version: "0.2.0".to_string(),
-            update_available: true,
+            current_version: cur_v,
+            latest_version: target_version,
+            update_available: update_avail,
+            version_mismatch: mismatch,
+            previous_version: prev_v,
             channel: "STABLE".to_string(),
-            release_title: "WiFi GigaChad 420 v0.2.0 Update Ready".to_string(),
+            release_title: format!("WiFi GigaChad 420 Update: {} Ready", LATEST_APP_VERSION),
             highlights: vec![
-                "Enhanced Multi-Wi-Fi Kalman Scheduler & 150ms Happy Eyeballs Failover".to_string(),
-                "Faster Cross-Device Phone <-> Laptop Wi-Fi Mesh Tunneling".to_string(),
-                "Improved Windows 11 802.11ax/be PHY Telemetry Polling".to_string(),
+                "Version Format: Standardized TST-0.X.3.11.2026 Release Architecture".to_string(),
+                "Automatic Version Mismatch Verification & Zero-Downtime Migration".to_string(),
+                "Enhanced Laptop-Only Tri-Link Multi-SSID Direct Selector (Anti-Swap Active)".to_string(),
+                "150ms Happy Eyeballs Multi-Path Proxy & Parallel DNS Race Resolver".to_string(),
             ],
             installing: false,
             progress_pct: 0.0,
@@ -489,6 +568,23 @@ async fn main() -> Result<()> {
 
     let virtual_wifi = ExperimentalVirtualWifiEngine::new().await;
 
+    let default_update = UpdateReleaseInfo::default();
+    if default_update.version_mismatch {
+        initial_logs.insert(
+            0,
+            SystemLogEntry {
+                timestamp: now_hms(),
+                level: "WARN".to_string(),
+                category: "UPDATE".to_string(),
+                message: format!(
+                    "Version Mismatch Detected! Installed version '{}' != Running binary version '{}'. The app is being updated!",
+                    default_update.previous_version.as_deref().unwrap_or("Unknown"),
+                    default_update.current_version
+                ),
+            },
+        );
+    }
+
     let ctx = AppContext {
         initial_mode: Arc::new(RwLock::new(initial_mode)),
         inr,
@@ -498,7 +594,7 @@ async fn main() -> Result<()> {
         virtual_wifi,
         routing_mode: Arc::new(RwLock::new("max_speed".to_string())),
         speed_test: Arc::new(RwLock::new(None)),
-        update_info: Arc::new(RwLock::new(UpdateReleaseInfo::default())),
+        update_info: Arc::new(RwLock::new(default_update)),
         logs: Arc::new(RwLock::new(initial_logs)),
         wlan_diag: Arc::new(RwLock::new(diag)),
         first_ui_poll,
@@ -858,18 +954,28 @@ async fn handle_ui_http_connection(mut stream: TcpStream, ctx: AppContext) -> Re
     }
 
     if method == "POST" && path == "/api/update-check" {
-        let u = ctx.update_info.read().await.clone();
-        write_http_response(&mut stream, 200, "application/json", &serde_json::to_vec(&u)?).await?;
+        let mut u = ctx.update_info.write().await;
+        if let Some(stored) = read_installed_version_from_disk() {
+            if stored != u.latest_version {
+                u.current_version = stored;
+                u.update_available = is_version_mismatch(&u.current_version, &u.latest_version);
+                u.version_mismatch = u.update_available;
+            }
+        }
+        let snapshot = u.clone();
+        write_http_response(&mut stream, 200, "application/json", &serde_json::to_vec(&snapshot)?).await?;
         return Ok(());
     }
 
     if method == "POST" && path == "/api/update-install" {
         let u_lock = ctx.update_info.clone();
-        {
+        let target_ver = {
             let mut guard = u_lock.write().await;
             guard.installing = true;
             guard.progress_pct = 25.0;
-        }
+            guard.latest_version.clone()
+        };
+        let ctx_clone = ctx.clone();
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(500)).await;
             {
@@ -881,11 +987,35 @@ async fn handle_ui_http_connection(mut stream: TcpStream, ctx: AppContext) -> Re
                 let mut guard = u_lock.write().await;
                 guard.installing = false;
                 guard.progress_pct = 100.0;
-                guard.current_version = guard.latest_version.clone();
+                guard.current_version = target_ver.clone();
                 guard.update_available = false;
+                guard.version_mismatch = false;
+                let _ = write_installed_version_to_disk(&target_ver);
             }
+            ctx_clone.push_log(
+                "OK",
+                "UPDATE",
+                format!("Successfully applied update to {}. Version mismatch resolved.", target_ver)
+            ).await;
         });
         write_http_response(&mut stream, 200, "application/json", b"{\"ok\":true}").await?;
+        return Ok(());
+    }
+
+    if method == "POST" && path == "/api/update-simulate-mismatch" {
+        let mut guard = ctx.update_info.write().await;
+        guard.current_version = APP_VERSION_V1.to_string();
+        guard.latest_version = APP_VERSION_V2.to_string();
+        guard.version_mismatch = true;
+        guard.update_available = true;
+        let _ = write_installed_version_to_disk(APP_VERSION_V1);
+        ctx.push_log(
+            "WARN",
+            "UPDATE",
+            format!("Simulated Version Mismatch: Installed '{}' vs Target '{}'.", APP_VERSION_V1, APP_VERSION_V2)
+        ).await;
+        let snapshot = guard.clone();
+        write_http_response(&mut stream, 200, "application/json", &serde_json::to_vec(&snapshot)?).await?;
         return Ok(());
     }
 
@@ -1305,4 +1435,49 @@ async fn write_http_response(
     stream.write_all(header.as_bytes()).await?;
     stream.write_all(body).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_version_format_constants() {
+        assert_eq!(APP_VERSION_PREFIX, "TST");
+        assert_eq!(APP_VERSION_SUFFIX, "3.11.2026");
+        assert_eq!(CURRENT_APP_VERSION, "TST-0.1.3.11.2026");
+        assert_eq!(LATEST_APP_VERSION, "TST-0.2.3.11.2026");
+
+        assert!(is_valid_tst_version("TST-0.1.3.11.2026"));
+        assert!(is_valid_tst_version("TST-0.2.3.11.2026"));
+        assert!(!is_valid_tst_version("0.1.0"));
+
+        assert_eq!(format_tst_version(1), "TST-0.1.3.11.2026");
+        assert_eq!(format_tst_version(2), "TST-0.2.3.11.2026");
+    }
+
+    #[test]
+    fn test_version_mismatch_detection() {
+        let v1 = "TST-0.1.3.11.2026";
+        let v2 = "TST-0.2.3.11.2026";
+
+        assert!(!is_version_mismatch(v1, v1));
+        assert!(is_version_mismatch(v1, v2));
+
+        let update_info = UpdateReleaseInfo {
+            current_version: v1.to_string(),
+            latest_version: v2.to_string(),
+            update_available: is_version_mismatch(v1, v2),
+            version_mismatch: is_version_mismatch(v1, v2),
+            previous_version: Some(v1.to_string()),
+            channel: "STABLE".to_string(),
+            release_title: format!("WiFi GigaChad 420 Update: {} Ready", v2),
+            highlights: vec!["Version mismatch detected".to_string()],
+            installing: false,
+            progress_pct: 0.0,
+        };
+
+        assert!(update_info.update_available);
+        assert!(update_info.version_mismatch);
+    }
 }
