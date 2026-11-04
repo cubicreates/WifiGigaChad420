@@ -1,0 +1,20 @@
+[package]
+name = "giga_virtual_wifi"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lib]
+name = "giga_virtual_wifi"
+path = "mod.rs"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+giga_pal.workspace = true
+giga_inr.workspace = true
+giga_scheduler.workspace = true
+

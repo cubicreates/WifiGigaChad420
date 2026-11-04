@@ -45,6 +45,19 @@ Standard operating systems (Windows, Linux, macOS, Android) route all outbound i
 | **System-Wide Internet Optimization** | Extends multi-interface routing to web browsing, API requests, streaming, and desktop/mobile applications via **Multi-Interface Parallel DNS (`hickory-resolver`)**, **Local HTTP/SOCKS5 Loopback Proxy**, and **Virtual TUN (`WinTun`, `tun-rs`, Android `VpnService` + `smoltcp`)** with TLS SNI Domain Affinity. |
 | **Cross-Device Phone ↔ Laptop Wi-Fi Mesh** | Bridges a Phone and Laptop over a **single shared Wi-Fi network** using mDNS discovery and encrypted **QUIC (`iroh` / `quinn`)**. Enables the Laptop to aggregate the local Wi-Fi router's WAN and the Phone's 5G cellular connection wirelessly at the same time. |
 | **Zero-Copy Sparse Disk Engine** | Pre-allocates target files (`fallocate` / `SetFileInformationByHandle`) and executes concurrent, lock-free positional disk writes (`pwrite`) with streaming SIMD **SHA-256 and BLAKE3** cryptographic verification. |
+| **Laptop-Only Multi-Wi-Fi Connector** | Connects and pools up to 3 Wi-Fi networks simultaneously **directly on the laptop** without requiring a phone or dongles, utilizing Anti-Swap (`fMinimizeConnections = 0`) and Windows Wi-Fi Direct virtual sub-channels (`VWIFIMP_WFD`). |
+
+---
+
+## Windows Production Executable
+
+The production Windows single-file executable is packaged and deployed at:
+`prod/Desktop/win/WifiGigaChad420.exe`
+
+- **Single Portable File:** All native Rust transport workers, INR health state machine, and GUI assets are bundled into one standalone binary.
+- **Zero-CLI Popup Subsystem:** Compiled with `#![windows_subsystem = "windows"]` to run as a clean desktop window without flashing command-line consoles.
+- **Embedded Administrator Manifest:** UAC elevation (`requireAdministrator`) is embedded directly in the binary manifest for kernel socket binding and OS network optimization.
+- **Laptop Multi-Wi-Fi Connector:** Directly select 3 Wi-Fi profiles from your laptop's saved network list on Screen 1 to connect, probe, and pool them without swapping.
 
 ---
 

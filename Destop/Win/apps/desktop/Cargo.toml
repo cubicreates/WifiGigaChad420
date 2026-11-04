@@ -18,6 +18,7 @@ giga_scheduler = { workspace = true }
 giga_transport = { workspace = true }
 giga_store = { workspace = true }
 giga_mesh = { workspace = true }
+giga_virtual_wifi = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }

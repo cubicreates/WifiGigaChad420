@@ -129,6 +129,52 @@ export interface UpdateReleaseInfo {
   progress_pct: number;
 }
 
+export type CapabilityStatusLabel =
+  | 'SUPPORTED'
+  | 'UNSUPPORTED'
+  | 'EXPERIMENTAL'
+  | 'UNKNOWN'
+  | 'NOT TESTED'
+  | 'BLOCKED';
+
+export interface StructuredExperimentEvent {
+  timestamp: string;
+  component: string;
+  physical_interface: string;
+  virtual_interface: string;
+  network_identifier: string;
+  event: string;
+  result: CapabilityStatusLabel;
+  error_code: number | null;
+  duration_ms: number | null;
+  measurement: string;
+}
+
+export interface ExperimentalVirtualWifiTelemetry {
+  hardware_capability_status: CapabilityStatusLabel;
+  driver_capability_status: CapabilityStatusLabel;
+  firmware_capability_status: CapabilityStatusLabel;
+  virtual_adapter_status: CapabilityStatusLabel;
+  physical_radios_count: number;
+  actual_connected_wifi_count: number;
+  logical_virtual_interfaces_count: number;
+  radio_switching_status: CapabilityStatusLabel;
+  current_active_channel: number | null;
+  current_network: string;
+  current_scheduler_state: string;
+  packet_loss_pct: number;
+  switching_latency_ms: number;
+  throughput_mbps: number;
+  experiment_status: CapabilityStatusLabel;
+  last_error: string | null;
+  driver_installation_status: CapabilityStatusLabel;
+  virtual_interface_name: string;
+  virtual_interface_enabled: boolean;
+  hysteresis_switch_count: number;
+  last_experiment_summary: string;
+  structured_events: StructuredExperimentEvent[];
+}
+
 export interface SystemStatusPayload {
   interfaces: HealthScoreSnapshot[];
   proxy: ProxyTelemetrySnapshot;
@@ -138,6 +184,7 @@ export interface SystemStatusPayload {
   update_info: UpdateReleaseInfo;
   logs?: SystemLogEntry[];
   wlan_diag?: WlanHardwareDiagnostics;
+  virtual_wifi?: ExperimentalVirtualWifiTelemetry;
   os_status: {
     is_elevated_admin: boolean;
     system_proxy_enabled: boolean;

@@ -7,6 +7,7 @@ members = [
     "crates/giga_transport",
     "crates/giga_store",
     "crates/giga_mesh",
+    "experiments/virtual_wifi",
     "apps/cli",
     "apps/desktop",
 ]
@@ -48,3 +49,4 @@ giga_scheduler = { path = "crates/giga_scheduler" }
 giga_transport = { path = "crates/giga_transport" }
 giga_store = { path = "crates/giga_store" }
 giga_mesh = { path = "crates/giga_mesh" }
+giga_virtual_wifi = { path = "experiments/virtual_wifi" }

@@ -1,0 +1,41 @@
+;=============================================================================
+; gigachadmux.inf — WiFi GigaChad 420 NDIS 6.80 Intermediate MUX Virtual Adapter
+;=============================================================================
+
+[Version]
+Signature   = "$Windows NT$"
+Class       = Net
+ClassGUID   = {4d36e972-e325-11ce-bfc1-08002be10318}
+Provider    = %ManufacturerName%
+DriverVer   = 11/03/2026,0.1.0.0
+CatalogFile = gigachadmux.cat
+PnpLockdown = 1
+
+[Manufacturer]
+%ManufacturerName% = GigaChad,NTamd64
+
+[GigaChad.NTamd64]
+%GigaChadMuxDesc% = GigaChadMux.Install, MS_GIGACHAD_MUXMP
+
+[GigaChadMux.Install]
+Characteristics = 0x81 ; NCF_VIRTUAL | NCF_HAS_UI
+*IfType         = 6    ; IF_TYPE_ETHERNET_CSMACD
+*MediaType      = 0    ; NdisMedium802_3
+*PhysicalMediaType = 0
+CopyFiles       = GigaChadMux.CopyFiles
+
+[GigaChadMux.Install.Services]
+AddService = GigaChadMux, 2, GigaChadMux.Service
+
+[GigaChadMux.Service]
+DisplayName    = %GigaChadMuxDesc%
+ServiceType    = 1 ; SERVICE_KERNEL_DRIVER
+StartType      = 3 ; SERVICE_DEMAND_START
+ErrorControl   = 1 ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %12%\gigachadmux.sys
+LoadOrderGroup = NDIS
+
+[Strings]
+ManufacturerName = "WiFi GigaChad 420 Research"
+GigaChadMuxDesc  = "WiFi GigaChad 420 Virtual Network"
+
