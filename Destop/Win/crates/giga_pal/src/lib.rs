@@ -12,13 +12,20 @@ pub use interface::{
     PlatformNetworkManager, WifiTelemetry,
 };
 pub use os_optimizer::{
-    OsOptimizationReport, OsOptimizationStep, apply_windows_multi_connector_optimizations,
-    is_running_as_admin, is_system_proxy_enabled, set_windows_system_proxy,
+    OsOptimizationReport, OsOptimizationStep, apply_windows_crack_mode_optimizations,
+    apply_windows_multi_connector_optimizations, is_running_as_admin, is_system_proxy_enabled,
+    set_windows_system_proxy,
 };
 pub use socket::{
     BoundConnectResult, connect_bound_tcp_v4, create_bound_tcp_socket_v4,
     create_bound_udp_socket_v4,
 };
+#[cfg(windows)]
+pub use windows::query_interface_octets;
+#[cfg(not(windows))]
+pub fn query_interface_octets(_if_index: u32) -> Option<(u64, u64)> {
+    None
+}
 
 /// Returns the default platform-specific network manager for the current OS.
 pub fn create_platform_manager() -> Box<dyn PlatformNetworkManager> {
@@ -61,6 +68,13 @@ mod tests {
                 "Failed to create IP_UNICAST_IF bound socket on {}: {:?}",
                 iface.friendly_name,
                 sock.err()
+            );
+
+            let octets = query_interface_octets(iface.if_index);
+            assert!(
+                octets.is_some(),
+                "Failed to query real hardware octets for interface {}",
+                iface.friendly_name
             );
         }
     }

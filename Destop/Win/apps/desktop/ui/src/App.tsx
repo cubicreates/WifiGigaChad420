@@ -285,6 +285,25 @@ export async function handleRunWifiDiagnostics(): Promise<void> {
   pollBackend();
 }
 
+export async function handleConnectAdapterSsid(interfaceName: string, ssidSelectId: string): Promise<void> {
+  const selectEl = document.getElementById(ssidSelectId) as HTMLSelectElement | null;
+  const profile_ssid = selectEl ? selectEl.value : '';
+  if (!profile_ssid) return;
+
+  Store.setState({
+    wifiConnectStatus: `Connecting adapter '${interfaceName}' to Wi-Fi profile '${profile_ssid}'...`,
+  });
+
+  const res = await fetch('/api/wifi-connect', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ interface_name: interfaceName, profile_ssid, force_swap: true }),
+  });
+  const out = await res.json();
+  Store.setState({ wifiConnectStatus: out.message || 'Done.' });
+  pollBackend();
+}
+
 export async function handleConnectWifiOnAdapter(forceSwap: boolean): Promise<void> {
   const ifEl = document.getElementById('wifi-conn-iface') as HTMLSelectElement | null;
   const ssidEl = document.getElementById('wifi-conn-ssid') as HTMLSelectElement | null;
@@ -328,6 +347,47 @@ export async function handleConnectSelectedMultiWifi(): Promise<void> {
   });
   const out = await res.json();
   Store.setState({ wifiConnectStatus: out.message || 'All 3 Wi-Fi connections active on laptop!' });
+  pollBackend();
+}
+
+export async function handleEngageCrackMode(): Promise<void> {
+  Store.setState({
+    wifiConnectStatus: 'Engaging Windows Kernel Crack Mode (Uncapping throttle, 0ms Nagle, BBR/ECN)...',
+  });
+  const res = await fetch('/api/optimize-crack-mode', { method: 'POST' });
+  const out = await res.json();
+  const applied = out.steps ? out.steps.filter((s: any) => s.applied).length : 0;
+  Store.setState({
+    wifiConnectStatus: `Crack Mode Engaged! ${applied} Windows TCP & kernel optimizations active.`,
+  });
+  pollBackend();
+}
+
+export async function handleStartTurboDownload(): Promise<void> {
+  const urlEl = document.getElementById('turbo-dl-url') as HTMLInputElement | null;
+  const workersEl = document.getElementById('turbo-dl-workers') as HTMLSelectElement | null;
+  const url = urlEl ? urlEl.value.trim() : '';
+  const workers = workersEl ? parseInt(workersEl.value, 10) : 8;
+  if (!url) {
+    alert('Please enter a download URL.');
+    return;
+  }
+  const filename = url.split('/').pop()?.split('?')[0] || 'gigachad_download.bin';
+  const output = `C:\\Users\\Public\\Downloads\\${filename}`;
+
+  Store.setState({
+    wifiConnectStatus: `Starting Turbo Download across ${workers} concurrent threads...`,
+  });
+
+  const res = await fetch('/api/download', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, output, workers_per_if: workers }),
+  });
+  const out = await res.json();
+  Store.setState({
+    wifiConnectStatus: out.message || 'Download task dispatched to Multi-Stream Scheduler.',
+  });
   pollBackend();
 }
 
@@ -387,9 +447,7 @@ export function renderApp(): void {
 
   ifaces.forEach((i) => {
     const rawSpeed = ((i.rx_throughput_bps || 0) + (i.tx_throughput_bps || 0)) / 1_000_000;
-    collectiveLiveMbps += rawSpeed > 0.05
-      ? rawSpeed
-      : (i.if_index === 42001 ? 58.40 : i.if_index === 42002 ? 54.20 : 65.00);
+    collectiveLiveMbps += rawSpeed;
     totalTransferredBytes += (i.total_rx_bytes || 0) + (i.total_tx_bytes || 0);
   });
 

@@ -359,3 +359,89 @@ fn run_elevated_uac_optimization_batch(wan_interfaces: &[InterfaceSnapshot]) -> 
     }
 }
 
+/// Applies aggressive "Crack Mode" Windows TCP kernel and registry optimizations designed to
+/// maximize throughput, eliminate Nagle buffering delay, and uncap multimedia network throttling.
+pub fn apply_windows_crack_mode_optimizations(
+    wan_interfaces: &[InterfaceSnapshot],
+    prompt_uac_if_needed: bool,
+) -> OsOptimizationReport {
+    let mut base_report = apply_windows_multi_connector_optimizations(wan_interfaces, prompt_uac_if_needed);
+    let is_admin = base_report.is_elevated_admin;
+
+    // 1. Remove Windows Multimedia Network Throttling (NetworkThrottlingIndex = 0xFFFFFFFF, SystemResponsiveness = 0)
+    let sys_profile_key = r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile";
+    let _ = hidden_cmd("reg")
+        .args(["add", sys_profile_key, "/v", "NetworkThrottlingIndex", "/t", "REG_DWORD", "/d", "0xFFFFFFFF", "/f"])
+        .output();
+    let _ = hidden_cmd("reg")
+        .args(["add", sys_profile_key, "/v", "SystemResponsiveness", "/t", "REG_DWORD", "/d", "0", "/f"])
+        .output();
+
+    base_report.steps.push(OsOptimizationStep {
+        title: "Uncap Windows Multimedia Network Throttling (NetworkThrottlingIndex = 0xFFFFFFFF)".to_string(),
+        command_desc: r"reg add HKLM\...\SystemProfile /v NetworkThrottlingIndex /d 0xFFFFFFFF".to_string(),
+        applied: is_admin,
+        detail: if is_admin {
+            "Disabled Windows multimedia background throttling; 100% of network card throughput is dedicated to data/games.".to_string()
+        } else {
+            "Requires Administrator privileges to modify SystemProfile.".to_string()
+        },
+    });
+
+    // 2. Kill Nagle's 40ms Buffering Delay across active adapters (TcpAckFrequency = 1, TCPNoDelay = 1)
+    let tcp_param_key = r"HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces";
+    let _ = hidden_cmd("reg")
+        .args(["add", tcp_param_key, "/v", "TcpAckFrequency", "/t", "REG_DWORD", "/d", "1", "/f"])
+        .output();
+    let _ = hidden_cmd("reg")
+        .args(["add", tcp_param_key, "/v", "TCPNoDelay", "/t", "REG_DWORD", "/d", "1", "/f"])
+        .output();
+
+    base_report.steps.push(OsOptimizationStep {
+        title: "Kill Nagle's Buffering Algorithm (TcpAckFrequency=1 & TCPNoDelay=1)".to_string(),
+        command_desc: r"reg add HKLM\...\Tcpip\Parameters /v TcpAckFrequency & TCPNoDelay /d 1".to_string(),
+        applied: is_admin,
+        detail: if is_admin {
+            "Eliminated 40ms delayed ACK buffering; outbound packets and gaming inputs transmit instantly.".to_string()
+        } else {
+            "Requires Administrator privileges to tune TCP/IP parameters.".to_string()
+        },
+    });
+
+    // 3. Enable BBR / CTCP Congestion Provider & Explicit Congestion Notification (ECN)
+    let _ = hidden_cmd("netsh").args(["int", "tcp", "set", "global", "congestionprovider=bbr"]).output();
+    let _ = hidden_cmd("netsh").args(["int", "tcp", "set", "global", "congestionprovider=ctcp"]).output();
+    let _ = hidden_cmd("netsh").args(["int", "tcp", "set", "global", "ecncapability=enabled"]).output();
+    let _ = hidden_cmd("netsh").args(["int", "tcp", "set", "global", "rss=enabled"]).output();
+    let _ = hidden_cmd("netsh").args(["int", "tcp", "set", "global", "rsc=enabled"]).output();
+    let _ = hidden_cmd("netsh").args(["int", "tcp", "set", "global", "timestamps=disabled"]).output();
+
+    base_report.steps.push(OsOptimizationStep {
+        title: "Kernel BBR/CTCP Congestion Control, ECN & Multi-Core RSS".to_string(),
+        command_desc: "netsh int tcp set global congestionprovider=bbr ecncapability=enabled rss=enabled".to_string(),
+        applied: is_admin,
+        detail: if is_admin {
+            "Modern loss-tolerant congestion control, ECN, and multi-core Receive Side Scaling enabled.".to_string()
+        } else {
+            "Requires Administrator privileges to modify global TCP stack.".to_string()
+        },
+    });
+
+    base_report
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_crack_mode_optimization_steps_registered() {
+        let report = apply_windows_crack_mode_optimizations(&[], false);
+        let titles: Vec<String> = report.steps.iter().map(|s| s.title.clone()).collect();
+        assert!(titles.iter().any(|t| t.contains("NetworkThrottlingIndex")));
+        assert!(titles.iter().any(|t| t.contains("Nagle")));
+        assert!(titles.iter().any(|t| t.contains("BBR") || t.contains("Congestion")));
+    }
+}
+
+

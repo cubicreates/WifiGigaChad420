@@ -5,8 +5,9 @@ use clap::Parser;
 use giga_inr::InrEngine;
 use giga_mesh::MeshBridgeEngine;
 use giga_pal::{
-    apply_windows_multi_connector_optimizations, connect_bound_tcp_v4, create_platform_manager,
-    is_running_as_admin, is_system_proxy_enabled, set_windows_system_proxy,
+    apply_windows_crack_mode_optimizations, apply_windows_multi_connector_optimizations,
+    connect_bound_tcp_v4, create_platform_manager, is_running_as_admin, is_system_proxy_enabled,
+    set_windows_system_proxy,
 };
 use giga_transport::{MultiPathDownloader, ProxyGatewayConfig, SystemProxyGateway};
 use giga_virtual_wifi::ExperimentalVirtualWifiEngine;
@@ -464,16 +465,16 @@ async fn main() -> Result<()> {
     if is_running_as_admin() {
         let pal = create_platform_manager();
         if let Ok(wan) = pal.enumerate_wan_candidates() {
-            let rep = apply_windows_multi_connector_optimizations(&wan, false);
+            let rep = apply_windows_crack_mode_optimizations(&wan, false);
             let applied_cnt = rep.steps.iter().filter(|s| s.applied).count();
             initial_logs.insert(
                 0,
                 SystemLogEntry {
                     timestamp: now_hms(),
                     level: "OK".to_string(),
-                    category: "OS-OPTIMIZER".to_string(),
+                    category: "CRACK-MODE".to_string(),
                     message: format!(
-                        "Applied {} Windows Multi-WiFi anti-swap & routing policies (fMinimizeConnections=0 across GroupPolicy, wifinetworkmanager & WcmSvc).",
+                        "Engaged Windows Network 'Crack Mode': Applied {} TCP, Nagle-kill & anti-throttle policies.",
                         applied_cnt
                     ),
                 },
@@ -530,6 +531,15 @@ async fn main() -> Result<()> {
         loop {
             interval.tick().await;
             let _ = inr_bg.refresh_and_probe(Duration::from_millis(2000)).await;
+        }
+    });
+
+    let inr_hw = inr.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_millis(1000));
+        loop {
+            interval.tick().await;
+            inr_hw.update_live_hardware_throughput().await;
         }
     });
 
@@ -885,11 +895,18 @@ async fn handle_ui_http_connection(mut stream: TcpStream, ctx: AppContext) -> Re
     }
 
     if method == "POST" && path == "/api/connect-multi-wifi" {
+        #[allow(dead_code)]
         #[derive(Deserialize)]
         struct MultiReq {
             wifi1: Option<String>,
             wifi2: Option<String>,
             wifi3: Option<String>,
+            assignments: Option<Vec<AdapterAssignment>>,
+        }
+        #[derive(Deserialize)]
+        struct AdapterAssignment {
+            interface: String,
+            ssid: String,
         }
         let req_opt: Option<MultiReq> = serde_json::from_str(body_str).ok();
 
@@ -900,43 +917,55 @@ async fn handle_ui_http_connection(mut stream: TcpStream, ctx: AppContext) -> Re
         }
 
         let mut connected_names = Vec::new();
+        let diag = inspect_wlan_hardware();
+        let phys_count = diag.physical_wifi_count;
+
         if let Some(r) = &req_opt {
-            if let Some(w1) = &r.wifi1 {
-                if !w1.is_empty() {
-                    let _ = hidden_cmd("netsh")
-                        .args(["wlan", "connect", &format!("name={}", w1), &format!("ssid={}", w1), "interface=Wi-Fi"])
-                        .output();
-                    connected_names.push(format!("Wi-Fi 1: {}", w1));
+            if let Some(list) = &r.assignments {
+                for item in list {
+                    if !item.ssid.is_empty() {
+                        let _ = hidden_cmd("netsh")
+                            .args(["wlan", "connect", &format!("name={}", item.ssid), &format!("ssid={}", item.ssid), &format!("interface={}", item.interface)])
+                            .output();
+                        connected_names.push(format!("{}: {}", item.interface, item.ssid));
+                    }
                 }
-            }
-            if let Some(w2) = &r.wifi2 {
-                if !w2.is_empty() {
-                    ctx.inr.set_secondary_wifi_ssid(w2.clone()).await;
-                    connected_names.push(format!("Wi-Fi 2: {}", w2));
+            } else {
+                // Backwards compatibility with wifi1 / wifi2 / wifi3
+                if let Some(w1) = &r.wifi1 {
+                    if !w1.is_empty() {
+                        let _ = hidden_cmd("netsh")
+                            .args(["wlan", "connect", &format!("name={}", w1), &format!("ssid={}", w1), "interface=Wi-Fi"])
+                            .output();
+                        connected_names.push(format!("Wi-Fi: {}", w1));
+                    }
                 }
-            }
-            if let Some(w3) = &r.wifi3 {
-                if !w3.is_empty() {
-                    ctx.inr.set_tertiary_wifi_ssid(w3.clone()).await;
-                    connected_names.push(format!("Wi-Fi 3: {}", w3));
+                if let Some(w2) = &r.wifi2 {
+                    if !w2.is_empty() && phys_count > 1 {
+                        let _ = hidden_cmd("netsh")
+                            .args(["wlan", "connect", &format!("name={}", w2), &format!("ssid={}", w2), "interface=Wi-Fi 2"])
+                            .output();
+                        connected_names.push(format!("Wi-Fi 2: {}", w2));
+                    }
                 }
             }
         }
 
         let _ = ctx.inr.refresh_and_probe(Duration::from_millis(1200)).await;
-        *ctx.wlan_diag.write().await = inspect_wlan_hardware();
+        *ctx.wlan_diag.write().await = diag;
 
-        let details = if connected_names.is_empty() {
-            "3 Wi-Fi connections (Primary Radio + Virtual Wi-Fi Direct 1 + Virtual Wi-Fi Direct 2)".to_string()
+        let msg = if phys_count <= 1 && connected_names.len() > 1 {
+            format!(
+                "Connected to [{}]. Note: This laptop has 1 physical Wi-Fi radio (MT7921, 0 secondary STAs). Windows switches association when connecting to another SSID. For true simultaneous multi-Wi-Fi aggregation without swapping, attach a USB Wi-Fi dongle or secondary interface.",
+                connected_names.first().cloned().unwrap_or_default()
+            )
+        } else if !connected_names.is_empty() {
+            format!("Multi-Adapter Connected: {}", connected_names.join(" | "))
         } else {
-            connected_names.join(" | ")
+            "No Wi-Fi networks selected.".to_string()
         };
 
-        let msg = format!(
-            "LAPTOP MULTI-WIFI ACTIVE: Successfully connected and pooled [{}] directly on laptop! Anti-Swap active, zero phone needed.",
-            details
-        );
-        ctx.push_log("OK", "MULTI-WIFI", &msg).await;
+        ctx.push_log("INFO", "WIFI-CONNECT", &msg).await;
 
         let resp = serde_json::json!({
             "ok": true,
@@ -1155,6 +1184,22 @@ async fn handle_ui_http_connection(mut stream: TcpStream, ctx: AppContext) -> Re
         return Ok(());
     }
 
+    if method == "POST" && path == "/api/optimize-crack-mode" {
+        let pal = create_platform_manager();
+        let wan = pal.enumerate_wan_candidates().unwrap_or_default();
+        let rep = apply_windows_crack_mode_optimizations(&wan, true);
+        let applied = rep.steps.iter().filter(|s| s.applied).count();
+        ctx.push_log(
+            if applied > 0 { "OK" } else { "WARN" },
+            "CRACK-MODE",
+            format!("Engaged Windows TCP 'Crack Mode': Uncapped network throttling, killed Nagle 40ms delay, enabled BBR ({} policies applied).", applied),
+        )
+        .await;
+        let bytes = serde_json::to_vec(&rep)?;
+        write_http_response(&mut stream, 200, "application/json", &bytes).await?;
+        return Ok(());
+    }
+
     if method == "POST" && path == "/api/system-proxy-toggle" {
         let currently_on = is_system_proxy_enabled();
         let res = set_windows_system_proxy(!currently_on, "127.0.0.1:1081");
@@ -1309,81 +1354,74 @@ async fn run_live_combined_speed_test(inr: &InrEngine) -> CombinedSpeedTestRepor
     for (iface, snap) in ranked {
         let inr_c = inr.clone();
         join_set.spawn(async move {
-            let local_ip = iface
-                .primary_ipv4()
-                .unwrap_or(Ipv4Addr::new(0, 0, 0, 0))
-                .to_string();
-
             let target = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 53);
             let rtt_ms = match connect_bound_tcp_v4(&iface, target, Duration::from_millis(2500)).await {
                 Ok((_, res)) => res.handshake_rtt_ms,
                 Err(_) => snap.ewma_rtt_ms,
             };
 
+            let octets_before = giga_pal::query_interface_octets(iface.if_index);
             let start = Instant::now();
-            let mut stream_tasks = tokio::task::JoinSet::new();
-            for chunk_idx in 0..4u64 {
-                let ip_bind = local_ip.clone();
-                let range_str = format!("{}-{}", chunk_idx * 200_000, (chunk_idx + 1) * 200_000 - 1);
-                stream_tasks.spawn(async move {
-                    let mut cmd = tokio::process::Command::new("curl.exe");
-                    #[cfg(windows)]
-                    {
-                        cmd.creation_flags(CREATE_NO_WINDOW);
-                    }
-                    let out = cmd
-                        .args([
-                            "-sS",
-                            "-L",
-                            "--max-time",
-                            "6",
-                            "--interface",
-                            &ip_bind,
-                            "-r",
-                            &range_str,
-                            "https://static.rust-lang.org/dist/channel-rust-stable.toml",
-                        ])
-                        .output()
-                        .await
-                        .ok()?;
-                    Some(out.stdout.len() as u64)
-                });
+
+            let mut cmd = tokio::process::Command::new("curl.exe");
+            #[cfg(windows)]
+            {
+                cmd.creation_flags(CREATE_NO_WINDOW);
             }
-
-            let mut total_bytes = 0u64;
-            while let Some(res) = stream_tasks.join_next().await {
-                if let Ok(Some(b)) = res {
-                    total_bytes += b;
-                }
-            }
-            let elapsed = start.elapsed().as_secs_f64().max(0.05);
-            let raw_speed = (total_bytes as f64 * 8.0) / (elapsed * 1_000_000.0);
-            let speed_mbps = if raw_speed > 0.1 {
-                raw_speed
-            } else {
-                match iface.if_index {
-                    42001 => 58.4 + ((rtt_ms as u64 % 7) as f64 * 0.8),
-                    42002 => 54.2 + ((rtt_ms as u64 % 5) as f64 * 0.7),
-                    _ => 65.0 + ((rtt_ms as u64 % 8) as f64 * 0.9),
-                }
-            };
-
-            let bytes_to_record = if total_bytes > 0 {
-                total_bytes
-            } else {
-                ((speed_mbps * 1_000_000.0 / 8.0) * 0.5) as u64
-            };
-
-            inr_c
-                .record_transfer_sample(iface.if_index, bytes_to_record, 0, Some(rtt_ms), true)
+            let res = cmd
+                .args([
+                    "-sS",
+                    "-L",
+                    "-o",
+                    "NUL",
+                    "--max-time",
+                    "5",
+                    "-w",
+                    "%{size_download}:%{time_total}",
+                    "https://speed.cloudflare.com/__down?bytes=5000000",
+                ])
+                .output()
                 .await;
+
+            let octets_after = giga_pal::query_interface_octets(iface.if_index);
+            let elapsed = start.elapsed().as_secs_f64().max(0.1);
+
+            let mut measured_bytes = 0u64;
+            let mut measured_time = elapsed;
+
+            if let Ok(out) = res {
+                let out_str = String::from_utf8_lossy(&out.stdout);
+                let parts: Vec<&str> = out_str.trim().split(':').collect();
+                if parts.len() == 2 {
+                    if let (Ok(bytes), Ok(time)) = (parts[0].parse::<u64>(), parts[1].parse::<f64>()) {
+                        if bytes > 0 && time > 0.05 {
+                            measured_bytes = bytes;
+                            measured_time = time;
+                        }
+                    }
+                }
+            }
+
+            if measured_bytes == 0 {
+                if let (Some((in_b, _)), Some((in_a, _))) = (octets_before, octets_after) {
+                    measured_bytes = in_a.saturating_sub(in_b);
+                }
+            }
+
+            let speed_mbps = (measured_bytes as f64 * 8.0) / (measured_time * 1_000_000.0);
+
+            if measured_bytes > 0 {
+                inr_c
+                    .record_transfer_sample(iface.if_index, measured_bytes, 0, Some(rtt_ms), true)
+                    .await;
+            }
 
             SpeedTestAdapterResult {
                 if_index: iface.if_index,
                 interface_name: iface.friendly_name.clone(),
                 ssid: snap.ssid,
-                speed_mbps,
-                rtt_ms,
+                speed_mbps: (speed_mbps * 100.0).round() / 100.0,
+                rtt_ms: (rtt_ms * 10.0).round() / 10.0,
             }
         });
     }

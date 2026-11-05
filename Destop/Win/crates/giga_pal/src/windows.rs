@@ -408,3 +408,17 @@ unsafe fn sockaddr_to_ipaddr(sa: *mut SOCKADDR) -> Option<IpAddr> {
     }
 }
 
+/// Query actual hardware byte counters directly from Windows kernel NDIS via GetIfEntry2
+pub fn query_interface_octets(if_index: u32) -> Option<(u64, u64)> {
+    use windows_sys::Win32::NetworkManagement::IpHelper::{GetIfEntry2, MIB_IF_ROW2};
+    let mut row: MIB_IF_ROW2 = unsafe { std::mem::zeroed() };
+    row.InterfaceIndex = if_index;
+    let ret = unsafe { GetIfEntry2(&mut row) };
+    if ret == 0 {
+        Some((row.InOctets, row.OutOctets))
+    } else {
+        None
+    }
+}
+
+
